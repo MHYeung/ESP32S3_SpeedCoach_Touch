@@ -1,17 +1,29 @@
-#include <string.h>
+#include "touch_cst328.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "touch_cst328.h"
+#include "driver/i2c_master.h"
 
 static const char *TAG = "cst328";
 
 #define CST328_I2C_ADDR_7BIT   0x1A      // 0x34/0x35 8-bit
 #define CST328_BASE_REG        0xD000    // first finger data
 
-static i2c_port_t s_i2c_port;
+// new-driver handles
+static i2c_master_bus_handle_t  s_i2c_bus   = NULL;
+static i2c_master_dev_handle_t  s_i2c_dev   = NULL;
+
 static gpio_num_t s_rst_gpio = -1;
 static gpio_num_t s_irq_gpio = -1;
+
+static esp_err_t cst328_read_regs(uint16_t reg16, uint8_t *buf, size_t len)
+{
+    uint8_t reg[2] = { (uint8_t)(reg16 >> 8), (uint8_t)(reg16 & 0xFF) };
+    return i2c_master_transmit_receive(s_i2c_dev,
+                                       reg, sizeof(reg),
+                                       buf, len,
+                                       -1);
+}
 
 esp_err_t cst328_init(i2c_port_t port,
                       gpio_num_t sda,
@@ -20,22 +32,30 @@ esp_err_t cst328_init(i2c_port_t port,
                       gpio_num_t irq,
                       uint32_t i2c_clk_hz)
 {
-    s_i2c_port = port;
     s_rst_gpio = rst;
     s_irq_gpio = irq;
 
-    i2c_config_t cfg = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = sda,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+    // 1) Create I2C master bus (new API)
+    i2c_master_bus_config_t bus_cfg = {
+        .i2c_port = port,
         .scl_io_num = scl,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = i2c_clk_hz,
+        .sda_io_num = sda,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .flags = {
+            .enable_internal_pullup = true,
+        },
     };
-    ESP_ERROR_CHECK(i2c_param_config(port, &cfg));
-    ESP_ERROR_CHECK(i2c_driver_install(port, cfg.mode, 0, 0, 0));
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &s_i2c_bus));
 
-    // Reset pin (active low)
+    // 2) Add CST328 device
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = CST328_I2C_ADDR_7BIT,
+        .scl_speed_hz    = i2c_clk_hz,
+    };
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_i2c_dev));
+
+    // 3) Reset pin (active low)
     if (rst >= 0) {
         gpio_config_t io = {
             .pin_bit_mask = 1ULL << rst,
@@ -47,7 +67,7 @@ esp_err_t cst328_init(i2c_port_t port,
         gpio_set_level(rst, 1);
     }
 
-    // IRQ as input
+    // 4) IRQ pin as input (if used)
     if (irq >= 0) {
         gpio_config_t io_irq = {
             .pin_bit_mask = 1ULL << irq,
@@ -58,20 +78,11 @@ esp_err_t cst328_init(i2c_port_t port,
         ESP_ERROR_CHECK(gpio_config(&io_irq));
     }
 
-    // Give chip time to boot (datasheet ~200ms) :contentReference[oaicite:3]{index=3}
-    vTaskDelay(pdMS_TO_TICKS(220));
+    // Give controller time to boot (~200 ms)
+    vTaskDelay(pdMS_TO_TICKS(200));
 
-    ESP_LOGI(TAG, "CST328 initialized");
+    ESP_LOGI(TAG, "CST328 init OK on port %d", port);
     return ESP_OK;
-}
-
-static esp_err_t cst328_read_regs(uint16_t reg16, uint8_t *buf, size_t len)
-{
-    uint8_t reg[2] = { (uint8_t)(reg16 >> 8), (uint8_t)(reg16 & 0xFF) };
-    return i2c_master_write_read_device(s_i2c_port, CST328_I2C_ADDR_7BIT,
-                                        reg, sizeof(reg),
-                                        buf, len,
-                                        pdMS_TO_TICKS(20));
 }
 
 esp_err_t cst328_read_point(cst328_point_t *out_pt)
@@ -90,13 +101,10 @@ esp_err_t cst328_read_point(cst328_point_t *out_pt)
     uint8_t yh        = buf[2];
     uint8_t xy_low    = buf[3];
     uint8_t pressure  = buf[4];
-    uint8_t flags     = buf[5];
-    uint8_t fixed     = buf[6];
+    // buf[5] flags, buf[6] fixed pattern, can be ignored here
 
-    (void)flags;
-    (void)fixed;
-
-    bool pressed = ((id_status & 0x0F) == 0x06); // "pressed" status as per datasheet :contentReference[oaicite:4]{index=4}
+    // Status 0x06 = “press” (from CST328 datasheet)
+    bool pressed = ((id_status & 0x0F) == 0x06);
 
     uint16_t x = ((uint16_t)xh << 4) | (xy_low >> 4);
     uint16_t y = ((uint16_t)yh << 4) | (xy_low & 0x0F);

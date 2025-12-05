@@ -1,0 +1,28 @@
+menu "QMI8658 IMU Configuration"
+
+config IMU_QMI8658_I2C_PORT
+    int "IMU_QMI8658 I2C port number"
+    default 1
+
+config IMU_QMI8658_SDA
+    int "IMU_QMI8658 SDA GPIO"
+    default 11
+
+config IMU_QMI8658_SCL
+    int "IMU_QMI8658 SCL GPIO"
+    default 10
+
+config IMU_QMI8658_INT1
+    int "IMU_QMI8658 INT1 GPIO"
+    default 13
+
+config IMU_QMI8658_INT1
+    int "IMU_QMI8658 INT2 GPIO"
+    default 12
+
+config IMU_QMI8658_I2C_CLK
+    int "IMU_QMI8658 I2C clock speed (Hz)"
+    default 400000
+
+
+endmenu
