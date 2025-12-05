@@ -25,9 +25,10 @@ static const char *TAG = "lcd_st7789";
 #define LCD_CMD_BITS       8
 #define LCD_PARAM_BITS     8
 
-esp_err_t lcd_st7789_init(esp_lcd_panel_handle_t *out_panel)
+esp_err_t lcd_st7789_init(esp_lcd_panel_handle_t *out_panel, esp_lcd_panel_io_handle_t *out_io)
 {
     ESP_RETURN_ON_FALSE(out_panel, ESP_ERR_INVALID_ARG, TAG, "out_panel is NULL");
+    ESP_RETURN_ON_FALSE(out_io,    ESP_ERR_INVALID_ARG, TAG, "out_io is NULL");
 
     esp_err_t ret;
     spi_bus_config_t buscfg = {
@@ -81,11 +82,10 @@ esp_err_t lcd_st7789_init(esp_lcd_panel_handle_t *out_panel)
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
-
-    // NO rotation yet, keep 240x320 portrait
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
     *out_panel = panel;
+    *out_io = io_handle;
     ESP_LOGI(TAG, "ST7789 LCD initialized");
     return ESP_OK;
 
