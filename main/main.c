@@ -11,26 +11,26 @@
 #include "i2c_helper.h"
 #include "qmi8658.h"
 
-#include "ui.h"   // our new UI module
-
+#include "ui.h" // our new UI module
+#include "math.h"
 #include <stdio.h>
 
 static const char *TAG = "app";
 
 /* ---------- Kconfig-based touch pins ---------- */
 
-#define TP_I2C_PORT  CONFIG_TOUCH_CST328_I2C_PORT
-#define TP_SDA_GPIO  CONFIG_TOUCH_CST328_SDA
-#define TP_SCL_GPIO  CONFIG_TOUCH_CST328_SCL
-#define TP_RST_GPIO  CONFIG_TOUCH_CST328_RST
-#define TP_INT_GPIO  CONFIG_TOUCH_CST328_INT
-#define TP_I2C_CLK   CONFIG_TOUCH_CST328_I2C_CLK
+#define TP_I2C_PORT CONFIG_TOUCH_CST328_I2C_PORT
+#define TP_SDA_GPIO CONFIG_TOUCH_CST328_SDA
+#define TP_SCL_GPIO CONFIG_TOUCH_CST328_SCL
+#define TP_RST_GPIO CONFIG_TOUCH_CST328_RST
+#define TP_INT_GPIO CONFIG_TOUCH_CST328_INT
+#define TP_I2C_CLK CONFIG_TOUCH_CST328_I2C_CLK
 
 /* IMU I2C pins (board-specific) – can also be Kconfig later */
-#define IMU_I2C_PORT  CONFIG_IMU_QMI8658_I2C_PORT
-#define IMU_SDA_GPIO  CONFIG_IMU_QMI8658_SDA
-#define IMU_SCL_GPIO  CONFIG_IMU_QMI8658_SCL
-#define IMU_I2C_CLK   CONFIG_IMU_QMI8658_I2C_CLK
+#define IMU_I2C_PORT CONFIG_IMU_QMI8658_I2C_PORT
+#define IMU_SDA_GPIO CONFIG_IMU_QMI8658_SDA
+#define IMU_SCL_GPIO CONFIG_IMU_QMI8658_SCL
+#define IMU_I2C_CLK CONFIG_IMU_QMI8658_I2C_CLK
 
 /* LVGL display + input */
 static lv_disp_t *s_disp = NULL;
@@ -38,6 +38,7 @@ static lv_indev_t *s_indev_touch = NULL;
 
 /* IMU handle */
 static qmi8658_handle_t s_imu;
+static ui_orientation_t s_current_orient = UI_ORIENT_PORTRAIT_0;
 
 /* Last touch point */
 static int16_t s_last_touch_x = 0;
@@ -48,28 +49,35 @@ static int16_t s_last_touch_y = 0;
  * ===========================================================
  */
 
-static void touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data)
+static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
 
     cst328_point_t pt;
-    if (cst328_read_point(&pt) == ESP_OK && pt.pressed) {
+    if (cst328_read_point(&pt) == ESP_OK && pt.pressed)
+    {
         int x = (int)pt.x;
         int y = (int)pt.y;
 
-        if (x < 0) x = 0;
-        if (x >= LCD_H_RES) x = LCD_H_RES - 1;
-        if (y < 0) y = 0;
-        if (y >= LCD_V_RES) y = LCD_V_RES - 1;
+        if (x < 0)
+            x = 0;
+        if (x >= LCD_H_RES)
+            x = LCD_H_RES - 1;
+        if (y < 0)
+            y = 0;
+        if (y >= LCD_V_RES)
+            y = LCD_V_RES - 1;
 
         s_last_touch_x = x;
         s_last_touch_y = y;
 
-        data->state   = LV_INDEV_STATE_PRESSED;
+        data->state = LV_INDEV_STATE_PRESSED;
         data->point.x = x;
         data->point.y = y;
-    } else {
-        data->state   = LV_INDEV_STATE_RELEASED;
+    }
+    else
+    {
+        data->state = LV_INDEV_STATE_RELEASED;
         data->point.x = s_last_touch_x;
         data->point.y = s_last_touch_y;
     }
@@ -80,18 +88,86 @@ static void touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data)
  * ===========================================================
  */
 
+static ui_orientation_t decide_orientation_from_accel(float ax, float ay, float az)
+{
+    /* Convert to "g" just so thresholds are ~1.0 */
+    const float g = 9.80665f;
+    float gx = ax / g;
+    float gy = ay / g;
+    float gz = az / g;
+
+    float ax_abs = fabsf(gx);
+    float ay_abs = fabsf(gy);
+    float az_abs = fabsf(gz);
+
+    /* If device is almost flat (gravity on Z), don't change orientation */
+    if (az_abs > 0.8f)
+    {
+        return UI_ORIENT_PORTRAIT_0; // we'll treat "no change" separately later
+    }
+
+    /* Decide whether it's more "portrait" or "landscape" */
+    if (ax_abs > ay_abs)
+    {
+        /* More tilt in X → landscape */
+        if (gx > 0.0f)
+        {
+            return UI_ORIENT_PORTRAIT_180; // you may swap 90/270 after testing
+        }
+        else
+        {
+            return UI_ORIENT_PORTRAIT_0;
+        }
+    }
+    else
+    {
+        /* More tilt in Y → portrait */
+        if (gy > 0.0f)
+        {
+            return UI_ORIENT_LANDSCAPE_90; // board upside down
+        }
+        else
+        {
+            return UI_ORIENT_LANDSCAPE_270; // "normal" portrait
+        }
+    }
+}
+
 static void imu_ui_task(void *arg)
 {
     uint32_t sample_idx = 0;
+    ui_orientation_t last_decision = s_current_orient;
+    int stable_count = 0;
 
-    while (1) {
+    while (1)
+    {
         float ax, ay, az;
         esp_err_t err = qmi8658_read_accel(&s_imu, &ax, &ay, &az);
-        if (err == ESP_OK) {
+        ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
+
+/* Simple stability filter */
+if (candidate == last_decision) {
+    if (stable_count < 20) stable_count++;  // cap it
+} else {
+    last_decision = candidate;
+    stable_count = 0;
+}
+
+/* Only change orientation if it's been stable for N samples */
+const int REQUIRED_STABLE_SAMPLES = 8;   // 8 * 50ms = 400ms
+if (stable_count >= REQUIRED_STABLE_SAMPLES &&
+    candidate != s_current_orient) {
+
+    s_current_orient = candidate;
+    ui_set_orientation(candidate);
+}
+        if (err == ESP_OK)
+        {
             ui_update_imu(ax, ay, az);
 
             /* Light logging: every 10th sample to avoid UART lag */
-            if ((sample_idx++ % 10) == 0) {
+            if ((sample_idx++ % 10) == 0)
+            {
                 ESP_LOGI("IMU", "ax=%.2f ay=%.2f az=%.2f m/s^2", ax, ay, az);
             }
         }
@@ -192,7 +268,8 @@ void app_main(void)
     init_imu_and_task();
 
     /* app_main can idle */
-    while (1) {
+    while (1)
+    {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

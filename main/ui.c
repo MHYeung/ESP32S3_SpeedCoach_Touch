@@ -33,6 +33,32 @@ static void btn_event_cb(lv_event_t *e)
         lv_label_set_text(label, "Click me");
     }
 }
+
+void ui_set_orientation(ui_orientation_t o)
+{
+    /* Map our enum -> LVGL’s rotation enum */
+    lv_display_rotation_t rot = LV_DISPLAY_ROTATION_0;
+
+    switch (o) {
+    case UI_ORIENT_PORTRAIT_0:
+        rot = LV_DISPLAY_ROTATION_0;
+        break;
+    case UI_ORIENT_LANDSCAPE_90:
+        rot = LV_DISPLAY_ROTATION_90;
+        break;
+    case UI_ORIENT_PORTRAIT_180:
+        rot = LV_DISPLAY_ROTATION_180;
+        break;
+    case UI_ORIENT_LANDSCAPE_270:
+        rot = LV_DISPLAY_ROTATION_270;
+        break;
+    }
+
+    lvgl_port_lock(0);
+    lv_display_set_rotation(s_disp, rot);   // LVGL 9 API
+    lvgl_port_unlock();
+}
+
 static void create_tabs_ui(void)
 {
     lv_obj_t *scr = lv_disp_get_scr_act(s_disp);

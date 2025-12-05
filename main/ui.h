@@ -14,6 +14,15 @@
  */
 void ui_init(lv_disp_t *disp);
 
+typedef enum {
+    UI_ORIENT_PORTRAIT_0,
+    UI_ORIENT_LANDSCAPE_90,
+    UI_ORIENT_PORTRAIT_180,
+    UI_ORIENT_LANDSCAPE_270,
+} ui_orientation_t;
+
+void ui_set_orientation(ui_orientation_t o);
+
 /**
  * Update IMU UI elements with new accelerometer data in SI units.
  *
