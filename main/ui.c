@@ -9,12 +9,16 @@ static lv_disp_t *s_disp = NULL;
 static lv_obj_t *s_tabview;
 static lv_obj_t *s_tab_controls;
 static lv_obj_t *s_tab_imu;
+static lv_obj_t *s_tab_system;
+static lv_obj_t *s_tab_settings;
 
 static lv_obj_t *s_label_imu;
 static lv_obj_t *s_chart;
 static lv_chart_series_t *s_ser_x;
 static lv_chart_series_t *s_ser_y;
 static lv_chart_series_t *s_ser_z;
+
+static ui_sd_test_cb_t s_sd_test_cb = NULL;
 
 /* ------------ Internal UI callbacks ------------ */
 
@@ -34,12 +38,34 @@ static void btn_event_cb(lv_event_t *e)
     }
 }
 
+
+void ui_register_sd_test_cb(ui_sd_test_cb_t cb)
+{
+    s_sd_test_cb = cb;
+}
+
+static void btn_settings_back_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_go_to_page(UI_PAGE_CONTROLS, true); // or your live-data page enum
+}
+
+static void btn_sd_test_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_sd_test_cb)
+    {
+        s_sd_test_cb();
+    }
+}
+
 void ui_set_orientation(ui_orientation_t o)
 {
     /* Map our enum -> LVGL’s rotation enum */
     lv_display_rotation_t rot = LV_DISPLAY_ROTATION_0;
 
-    switch (o) {
+    switch (o)
+    {
     case UI_ORIENT_PORTRAIT_0:
         rot = LV_DISPLAY_ROTATION_0;
         break;
@@ -55,7 +81,7 @@ void ui_set_orientation(ui_orientation_t o)
     }
 
     lvgl_port_lock(0);
-    lv_display_set_rotation(s_disp, rot);   // LVGL 9 API
+    lv_display_set_rotation(s_disp, rot); // LVGL 9 API
     lvgl_port_unlock();
 }
 
@@ -70,6 +96,8 @@ static void create_tabs_ui(void)
     /* Create tabs */
     s_tab_controls = lv_tabview_add_tab(s_tabview, "Controls");
     s_tab_imu = lv_tabview_add_tab(s_tabview, "IMU");
+    s_tab_system = lv_tabview_add_tab(s_tabview, "System");
+    s_tab_settings = lv_tabview_add_tab(s_tabview, "Settings");
 
     /* -------- Tab 1: Controls -------- */
     lv_obj_t *label1 = lv_label_create(s_tab_controls);
@@ -111,6 +139,24 @@ static void create_tabs_ui(void)
     lv_chart_set_all_value(s_chart, s_ser_x, 0);
     lv_chart_set_all_value(s_chart, s_ser_y, 0);
     lv_chart_set_all_value(s_chart, s_ser_z, 0);
+
+    lv_obj_t *sys_label = lv_label_create(s_tab_system);
+    lv_label_set_text(sys_label, "System info (placeholder)");
+    lv_obj_align(sys_label, LV_ALIGN_TOP_LEFT, 4, 4);
+
+    lv_obj_t *set_label = lv_label_create(s_tab_settings);
+    lv_label_set_text(set_label, "Settings (placeholder)");
+    lv_obj_align(set_label, LV_ALIGN_TOP_LEFT, 4, 4);
+
+    /* "Write test CSV" button */
+    lv_obj_t *btn_sd = lv_button_create(s_tab_settings);
+    lv_obj_set_size(btn_sd, 140, 40);
+    lv_obj_align(btn_sd, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_add_event_cb(btn_sd, btn_sd_test_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lbl_sd = lv_label_create(btn_sd);
+    lv_label_set_text(lbl_sd, "Write test CSV");
+    lv_obj_center(lbl_sd);
 }
 
 /* ------------ Public API ------------ */
@@ -152,3 +198,23 @@ void ui_update_imu(float ax, float ay, float az)
 
     lvgl_port_unlock();
 }
+
+void ui_go_to_page(ui_page_t page, bool animated)
+{
+    if (!s_tabview)
+        return;
+
+    /* Make sure the page index is valid */
+    if (page < 0 || page >= UI_PAGE_COUNT)
+    {
+        return;
+    }
+
+    lvgl_port_lock(0);
+    lv_tabview_set_active(
+        s_tabview,
+        (uint32_t)page, // index = enum value
+        animated ? LV_ANIM_ON : LV_ANIM_OFF);
+    lvgl_port_unlock();
+}
+

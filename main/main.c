@@ -10,12 +10,14 @@
 
 #include "i2c_helper.h"
 #include "qmi8658.h"
+#include "sd_mmc_helper.h"
 
 #include "ui.h" // our new UI module
 #include "math.h"
 #include <stdio.h>
 
 static const char *TAG = "app";
+static sd_mmc_helper_t s_sd; // <--- this is the missing variable
 
 /* ---------- Kconfig-based touch pins ---------- */
 
@@ -83,6 +85,21 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     }
 }
 
+static void sd_test_button_action(void)
+{
+    const char *csv =
+        "timestamp_ms,ax,ay,az\n"
+        "0,0.01,-0.02,9.81\n"
+        "50,0.03,-0.01,9.79\n";
+
+    esp_err_t err = sd_mmc_helper_write_text(&s_sd,
+                                             "imu_dummy.csv",
+                                             csv,
+                                             false); // overwrite
+    ESP_LOGI("APP", "sd_mmc_helper_write_text returned %s",
+             esp_err_to_name(err));
+}
+
 /* ===========================================================
  *  IMU → UI TASK
  * ===========================================================
@@ -145,22 +162,27 @@ static void imu_ui_task(void *arg)
         esp_err_t err = qmi8658_read_accel(&s_imu, &ax, &ay, &az);
         ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
 
-/* Simple stability filter */
-if (candidate == last_decision) {
-    if (stable_count < 20) stable_count++;  // cap it
-} else {
-    last_decision = candidate;
-    stable_count = 0;
-}
+        /* Simple stability filter */
+        if (candidate == last_decision)
+        {
+            if (stable_count < 20)
+                stable_count++; // cap it
+        }
+        else
+        {
+            last_decision = candidate;
+            stable_count = 0;
+        }
 
-/* Only change orientation if it's been stable for N samples */
-const int REQUIRED_STABLE_SAMPLES = 8;   // 8 * 50ms = 400ms
-if (stable_count >= REQUIRED_STABLE_SAMPLES &&
-    candidate != s_current_orient) {
+        /* Only change orientation if it's been stable for N samples */
+        const int REQUIRED_STABLE_SAMPLES = 8; // 8 * 50ms = 400ms
+        if (stable_count >= REQUIRED_STABLE_SAMPLES &&
+            candidate != s_current_orient)
+        {
 
-    s_current_orient = candidate;
-    ui_set_orientation(candidate);
-}
+            s_current_orient = candidate;
+            ui_set_orientation(candidate);
+        }
         if (err == ESP_OK)
         {
             ui_update_imu(ax, ay, az);
@@ -263,6 +285,15 @@ void app_main(void)
 
     /* Create UI in separate module */
     ui_init(s_disp);
+
+    /* Mount SD card */
+    ESP_ERROR_CHECK(sd_mmc_helper_mount(&s_sd, "/sdcard"));
+
+    const char *test = "hello\n";
+    esp_err_t err = sd_mmc_helper_write_text(&s_sd, "hello.txt", test, false);
+    ESP_LOGI("APP", "initial hello.txt write returned %s", esp_err_to_name(err));
+
+    ui_register_sd_test_cb(sd_test_button_action);
 
     /* IMU in its own task */
     init_imu_and_task();
