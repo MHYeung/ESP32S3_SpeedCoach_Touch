@@ -12,7 +12,8 @@
 #include "qmi8658.h"
 #include "sd_mmc_helper.h"
 
-#include "ui.h" // our new UI module
+#include "ui/ui.h" // our new UI module
+#include "ui/ui_sd_test_page.h"
 #include "math.h"
 #include <stdio.h>
 
@@ -101,6 +102,10 @@ static void sd_test_button_action(void)
              esp_err_to_name(err));
 }
 
+/* -------------------------------------------------------------------------- */
+/*  SETTINGS CALLBACKS (from Settings tab)                                    */
+/* -------------------------------------------------------------------------- */
+
 static void on_auto_rotate_setting_changed(bool enabled)
 {
     s_auto_rotate_enabled = enabled;
@@ -115,10 +120,9 @@ static void on_dark_mode_setting_changed(bool enabled)
     // ui_set_dark_mode(enabled);
 }
 
-/* ===========================================================
- *  IMU → UI TASK
- * ===========================================================
- */
+/* -------------------------------------------------------------------------- */
+/*  IMU ORIENTATION HELPER + TASK                                             */
+/* -------------------------------------------------------------------------- */
 
 static ui_orientation_t decide_orientation_from_accel(float ax, float ay, float az)
 {

@@ -1,5 +1,20 @@
 idf_component_register(
-    SRCS "main.c" "ui.c"
-    INCLUDE_DIRS "."
-    REQUIRES lcd_st7789 touch_cst328 esp_lvgl_port i2c_helper qmi8658 sd_mmc_helper
+    SRCS
+        "main.c"
+        "ui/ui_core.c"
+        "ui/ui_controls_page.c"
+        "ui/ui_imu_page.c"
+        "ui/ui_system_page.c"
+        "ui/ui_settings_page.c"
+        "ui/ui_sd_test_page.c"
+    INCLUDE_DIRS
+        "."
+        "ui"
+    REQUIRES
+        lcd_st7789
+        touch_cst328
+        esp_lvgl_port
+        i2c_helper
+        qmi8658
+        sd_mmc_helper
 )
