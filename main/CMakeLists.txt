@@ -17,4 +17,5 @@ idf_component_register(
         i2c_helper
         qmi8658
         sd_mmc_helper
+        ble
 )

@@ -11,6 +11,7 @@
 #include "i2c_helper.h"
 #include "qmi8658.h"
 #include "sd_mmc_helper.h"
+#include "ble.h"
 
 #include "ui/ui.h" // our new UI module
 #include "ui/ui_sd_test_page.h"
@@ -307,6 +308,10 @@ void app_main(void)
 
     /* Create UI in separate module */
     ui_init(s_disp);
+
+    ESP_ERROR_CHECK(ble_app_init());
+    ble_set_device_name("ESP32S3-BLE"); // optional custom name
+    ble_start_advertising();
 
     /* Mount SD card */
     ESP_ERROR_CHECK(sd_mmc_helper_mount(&s_sd, "/sdcard"));
