@@ -15,6 +15,7 @@
 
 #include "ui/ui.h" // our new UI module
 #include "ui/ui_sd_test_page.h"
+#include "ui/ui_data_page.h"
 #include "math.h"
 #include <stdio.h>
 

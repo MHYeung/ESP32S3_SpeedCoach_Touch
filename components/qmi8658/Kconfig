@@ -16,7 +16,7 @@ config IMU_QMI8658_INT1
     int "IMU_QMI8658 INT1 GPIO"
     default 13
 
-config IMU_QMI8658_INT1
+config IMU_QMI8658_INT2
     int "IMU_QMI8658 INT2 GPIO"
     default 12
 

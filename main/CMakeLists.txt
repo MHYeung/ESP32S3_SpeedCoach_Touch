@@ -7,6 +7,7 @@ idf_component_register(
         "ui/ui_system_page.c"
         "ui/ui_settings_page.c"
         "ui/ui_sd_test_page.c"
+        "ui/ui_data_page.c"
     INCLUDE_DIRS
         "."
         "ui"
