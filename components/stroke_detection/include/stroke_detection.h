@@ -1,0 +1,105 @@
+// components/stroke_detection/include/stroke_detection.h
+#pragma once
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    STROKE_EVENT_NONE = 0,
+    STROKE_EVENT_CATCH,
+    STROKE_EVENT_FINISH,
+} stroke_event_t;
+
+typedef struct {
+    float spm;
+    float stroke_period_s;
+    float drive_time_s;
+    float recovery_time_s;
+
+    // debug/telemetry (optional but useful)
+    float a_long;        // projected dynamic accel (m/s^2)
+    float a_long_f;      // filtered version
+    float g_mag;         // gyro magnitude (rad/s)
+} stroke_metrics_t;
+
+typedef struct {
+    float fs_hz;
+
+    // gravity/tilt rejection
+    float gravity_tau_s;         // ~0.5–1.0
+
+    // variance window for axis auto-detect
+    float axis_window_s;         // 3–5 seconds
+    float axis_hold_s;           // e.g. 0.5 seconds stable before switching
+
+    // filters for a_long (simple HPF + LPF)
+    float hpf_hz;                // ~0.5
+    float lpf_hz;                // ~8–10
+
+    // event detection constraints
+    float min_stroke_period_s;   // e.g. 0.4 (150 spm cap)
+    float max_stroke_period_s;   // e.g. 6.0 (10 spm floor)
+
+    // adaptive thresholding
+    float thr_k;                 // e.g. 1.2 (multiplier on RMS)
+    float thr_floor;             // e.g. 0.5 (m/s^2)
+} stroke_detection_cfg_t;
+
+/*
+ * Stroke detector state.
+ * Kept as a concrete struct so it can be allocated statically (no malloc).
+ * Note: The axis-variance window uses fixed 1024-sample buffers (per axis).
+ */
+typedef struct stroke_detection {
+    stroke_detection_cfg_t cfg;
+
+    bool has_prev_t;
+    float prev_t;
+
+    float g_est[3];
+
+    int win_n;
+    int win_i;
+    int win_count;
+    int hold_n;
+    int hold_count;
+    int best_axis; // 0=x 1=y 2=z
+
+    float buf_x[1024];
+    float buf_y[1024];
+    float buf_z[1024];
+    float sum[3];
+    float sumsq[3];
+
+    float hpf_lp_state;
+    float lpf_y;
+    float prev_a_f;
+
+    float rms2_ewma;
+
+    int phase; // internal
+
+    float t_last_catch;
+    float t_prev_catch;
+    float t_last_finish;
+    bool have_catch;
+    bool have_prev_catch;
+    bool have_finish;
+
+    stroke_metrics_t last;
+} stroke_detection_t;
+
+void stroke_detection_init(stroke_detection_t *sd, const stroke_detection_cfg_t *cfg);
+stroke_event_t stroke_detection_update(stroke_detection_t *sd,
+                                       float t_s,
+                                       float ax, float ay, float az,     // m/s^2
+                                       float gx, float gy, float gz,     // rad/s
+                                       stroke_metrics_t *out);
+
+#ifdef __cplusplus
+}
+#endif

@@ -12,16 +12,11 @@ typedef enum {
 } ui_orientation_t;
 
 typedef enum {
-    UI_PAGE_CONTROLS = 0,
-    UI_PAGE_IMU,
-    UI_PAGE_SYSTEM,
-    UI_PAGE_SETTINGS,
-    UI_SD_TEST,
+    UI_PAGE_SETTINGS = 0,
     UI_PAGE_COUNT,
 } ui_page_t;
 
 void ui_set_orientation(ui_orientation_t o);
-void ui_update_imu(float ax, float ay, float az);
 void ui_go_to_page(ui_page_t page, bool animated);
 
 

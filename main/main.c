@@ -1,4 +1,5 @@
 #include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -12,9 +13,10 @@
 #include "qmi8658.h"
 #include "sd_mmc_helper.h"
 #include "ble.h"
+#include "stroke_detection.h"
+#include "esp_timer.h"
 
 #include "ui/ui.h" // our new UI module
-#include "ui/ui_sd_test_page.h"
 #include "ui/ui_data_page.h"
 #include "math.h"
 #include <stdio.h>
@@ -43,8 +45,12 @@ static lv_indev_t *s_indev_touch = NULL;
 
 /* IMU handle */
 static qmi8658_handle_t s_imu;
-static ui_orientation_t s_current_orient = UI_ORIENT_PORTRAIT_0;
-static bool s_auto_rotate_enabled = true;
+static i2c_helper_t s_imu_bus;
+static stroke_detection_t s_stroke;
+/* Change this to pick a fixed UI orientation at boot */
+static ui_orientation_t s_current_orient = UI_ORIENT_LANDSCAPE_270;
+static bool s_auto_rotate_enabled = false;
+static bool s_auto_rotate_locked = false;
 
 /* Last touch point */
 static int16_t s_last_touch_x = 0;
@@ -87,21 +93,6 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         data->point.x = s_last_touch_x;
         data->point.y = s_last_touch_y;
     }
-}
-
-static void sd_test_button_action(void)
-{
-    const char *csv =
-        "timestamp_ms,ax,ay,az\n"
-        "0,0.01,-0.02,9.81\n"
-        "50,0.03,-0.01,9.79\n";
-
-    esp_err_t err = sd_mmc_helper_write_text(&s_sd,
-                                             "imu_dummy.csv",
-                                             csv,
-                                             false); // overwrite
-    ESP_LOGI("APP", "sd_mmc_helper_write_text returned %s",
-             esp_err_to_name(err));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -171,56 +162,127 @@ static ui_orientation_t decide_orientation_from_accel(float ax, float ay, float 
     }
 }
 
-static void imu_ui_task(void *arg)
+/* -------------------------------------------------------------------------- */
+/*  IMU INIT + STROKE TASK                                                    */
+/* -------------------------------------------------------------------------- */
+
+static void init_imu(void)
 {
-    uint32_t sample_idx = 0;
-    ui_orientation_t last_decision = s_current_orient;
-    int stable_count = 0;
+    ESP_LOGI(TAG, "Init IMU I2C bus + QMI8658...");
 
-    while (1)
-    {
-        float ax, ay, az;
-        esp_err_t err = qmi8658_read_accel(&s_imu, &ax, &ay, &az);
-        if (s_auto_rotate_enabled)
-        {
-            ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
+    ESP_ERROR_CHECK(i2c_helper_init(&s_imu_bus,
+                                    IMU_I2C_PORT,
+                                    IMU_SDA_GPIO,
+                                    IMU_SCL_GPIO,
+                                    IMU_I2C_CLK));
 
-            /* Simple stability filter */
-            if (candidate == last_decision)
-            {
-                if (stable_count < 20)
-                    stable_count++; // cap it
-            }
-            else
-            {
-                last_decision = candidate;
-                stable_count = 0;
-            }
+    ESP_ERROR_CHECK(qmi8658_init(&s_imu, &s_imu_bus, QMI8658_I2C_ADDR));
+}
 
-            /* Only change orientation if it's been stable for N samples */
-            const int REQUIRED_STABLE_SAMPLES = 8; // 8 * 50ms = 400ms
-            if (stable_count >= REQUIRED_STABLE_SAMPLES &&
-                candidate != s_current_orient)
-            {
+static void auto_rotate_on_stroke_update(stroke_event_t ev, float t_s)
+{
+    static float last_event_t = -1.0f;
 
-                s_current_orient = candidate;
-                ui_set_orientation(candidate);
-            }
+    if (ev != STROKE_EVENT_NONE) {
+        last_event_t = t_s;
+        if (!s_auto_rotate_locked && s_auto_rotate_enabled) {
+            s_auto_rotate_locked = true;
+            s_auto_rotate_enabled = false;
+            ESP_LOGI("APP", "Auto-rotate locked (stroke started)");
         }
-        if (err == ESP_OK)
-        {
-            ui_update_imu(ax, ay, az);
+    }
 
-            /* Light logging: every 10th sample to avoid UART lag */
-            if ((sample_idx++ % 10) == 0)
-            {
-                ESP_LOGI("IMU", "ax=%.2f ay=%.2f az=%.2f m/s^2", ax, ay, az);
-            }
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(50)); // 20 Hz
+    // Unlock after a quiet period (no stroke events)
+    const float UNLOCK_IDLE_S = 5.0f;
+    if (s_auto_rotate_locked && last_event_t > 0.0f && (t_s - last_event_t) > UNLOCK_IDLE_S) {
+        s_auto_rotate_locked = false;
+        s_auto_rotate_enabled = true;
+        ESP_LOGI("APP", "Auto-rotate unlocked (idle %.1fs)", (double)(t_s - last_event_t));
     }
 }
+
+static void stroke_task(void *arg)
+{
+    (void)arg;
+
+    const float fs_hz = 200.0f;
+    const stroke_detection_cfg_t cfg = {
+        .fs_hz = fs_hz,
+        .gravity_tau_s = 0.8f,
+        .axis_window_s = 4.0f,
+        .axis_hold_s = 0.5f,
+        .hpf_hz = 0.5f,
+        .lpf_hz = 10.0f,
+        .min_stroke_period_s = 0.4f,
+        .max_stroke_period_s = 6.0f,
+        .thr_k = 1.2f,
+        .thr_floor = 0.5f,
+    };
+
+    stroke_detection_init(&s_stroke, &cfg);
+
+    const int64_t t0_us = esp_timer_get_time();
+    TickType_t last_ui_tick = xTaskGetTickCount();
+
+    ui_orientation_t last_orient = s_current_orient;
+    int stable_count = 0;
+
+    const TickType_t sample_delay = pdMS_TO_TICKS(5);   // ~200 Hz
+    const TickType_t ui_period = pdMS_TO_TICKS(100);    // 10 Hz UI updates
+
+    while (1) {
+        float ax, ay, az, gx, gy, gz;
+        esp_err_t err = qmi8658_read_accel_gyro(&s_imu, &ax, &ay, &az, &gx, &gy, &gz);
+        if (err == ESP_OK) {
+            float t_s = (float)(esp_timer_get_time() - t0_us) * 1e-6f;
+
+            stroke_metrics_t m;
+            stroke_event_t ev = stroke_detection_update(&s_stroke, t_s, ax, ay, az, gx, gy, gz, &m);
+            auto_rotate_on_stroke_update(ev, t_s);
+            if (ev != STROKE_EVENT_NONE) {
+                ESP_LOGI("STROKE", "ev=%d spm=%.1f drive=%.2fs rec=%.2fs",
+                         (int)ev, (double)m.spm, (double)m.drive_time_s, (double)m.recovery_time_s);
+            }
+
+            if (s_auto_rotate_enabled) {
+                ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
+
+                if (candidate == last_orient) {
+                    if (stable_count < 20) stable_count++;
+                } else {
+                    last_orient = candidate;
+                    stable_count = 0;
+                }
+
+                if (stable_count >= 8 && candidate != s_current_orient) {
+                    s_current_orient = candidate;
+                    ui_set_orientation(candidate);
+                }
+            }
+
+            TickType_t now = xTaskGetTickCount();
+            if ((now - last_ui_tick) >= ui_period) {
+                last_ui_tick = now;
+
+                data_values_t v = {
+                    .time_s = t_s,
+                    .distance_m = NAN,
+                    .pace_s_per_500m = NAN,
+                    .speed_mps = NAN,
+                    .spm = m.spm,
+                    .stroke_period_s = m.stroke_period_s,
+                    .drive_time_s = m.drive_time_s,
+                    .recovery_time_s = m.recovery_time_s,
+                    .power_w = NAN,
+                };
+                data_page_set_values(&v);
+            }
+        }
+
+        vTaskDelay(sample_delay);
+    }
+}
+
 
 /* ===========================================================
  *  INIT HELPERS
@@ -279,24 +341,6 @@ static void init_touch_and_lvgl_input(void)
     lv_indev_set_display(s_indev_touch, s_disp);
 }
 
-static void init_imu_and_task(void)
-{
-    ESP_LOGI(TAG, "Init IMU I2C bus + QMI8658...");
-
-    i2c_helper_t imu_bus;
-    ESP_ERROR_CHECK(i2c_helper_init(&imu_bus,
-                                    IMU_I2C_PORT,
-                                    IMU_SDA_GPIO,
-                                    IMU_SCL_GPIO,
-                                    IMU_I2C_CLK));
-
-    ESP_ERROR_CHECK(qmi8658_init(&s_imu, &imu_bus, QMI8658_I2C_ADDR));
-
-    /* IMU UI task – prio 3, LVGL task is usually prio 4 */
-    xTaskCreatePinnedToCore(imu_ui_task, "imu_ui",
-                            4096, NULL, 3, NULL, 0);
-}
-
 /* ===========================================================
  *  app_main – orchestrator
  * ===========================================================
@@ -309,25 +353,32 @@ void app_main(void)
 
     /* Create UI in separate module */
     ui_init(s_disp);
+    ui_set_orientation(s_current_orient);
+
+    /* Default Data page metrics for rowing */
+    const data_metric_t metrics[3] = {
+        DATA_METRIC_SPM,
+        DATA_METRIC_DRIVE_TIME,
+        DATA_METRIC_RECOVERY_TIME,
+    };
+    data_page_set_metrics(metrics, 3);
 
     ESP_ERROR_CHECK(ble_app_init());
     ble_set_device_name("ESP32S3-BLE"); // optional custom name
     ble_start_advertising();
 
-    /* Mount SD card */
-    ESP_ERROR_CHECK(sd_mmc_helper_mount(&s_sd, "/sdcard"));
+    /* Optional SD card */
+    esp_err_t sd_err = sd_mmc_helper_mount(&s_sd, "/sdcard");
+    if (sd_err != ESP_OK) {
+        ESP_LOGW(TAG, "SD mount failed: %s (continuing)", esp_err_to_name(sd_err));
+    }
 
     ui_register_dark_mode_cb(on_dark_mode_setting_changed);
     ui_register_auto_rotate_cb(on_auto_rotate_setting_changed);
 
-    const char *test = "hello\n";
-    esp_err_t err = sd_mmc_helper_write_text(&s_sd, "hello.txt", test, false);
-    ESP_LOGI("APP", "initial hello.txt write returned %s", esp_err_to_name(err));
-
-    ui_register_sd_test_cb(sd_test_button_action);
-
-    /* IMU in its own task */
-    init_imu_and_task();
+    init_imu();
+    xTaskCreatePinnedToCore(stroke_task, "stroke",
+                            6144, NULL, 3, NULL, 0);
 
     /* app_main can idle */
     while (1)

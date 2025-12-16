@@ -2,11 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "ui/ui_core.c"
-        "ui/ui_controls_page.c"
-        "ui/ui_imu_page.c"
-        "ui/ui_system_page.c"
         "ui/ui_settings_page.c"
-        "ui/ui_sd_test_page.c"
         "ui/ui_data_page.c"
     INCLUDE_DIRS
         "."
@@ -17,6 +13,7 @@ idf_component_register(
         esp_lvgl_port
         i2c_helper
         qmi8658
+        stroke_detection
         sd_mmc_helper
         ble
 )
