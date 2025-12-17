@@ -211,12 +211,12 @@ static void stroke_task(void *arg)
         .gravity_tau_s = 0.8f,
         .axis_window_s = 4.0f,
         .axis_hold_s = 0.5f,
-        .hpf_hz = 0.5f,
-        .lpf_hz = 10.0f,
-        .min_stroke_period_s = 0.4f,
-        .max_stroke_period_s = 6.0f,
-        .thr_k = 1.2f,
-        .thr_floor = 0.5f,
+        .hpf_hz = 0.2f,
+        .lpf_hz = 1.2f,
+        .min_stroke_period_s = 0.8f,
+        .max_stroke_period_s = 5.0f,
+        .thr_k = 1.0f,
+        .thr_floor = 0.10f,
     };
 
     stroke_detection_init(&s_stroke, &cfg);
@@ -240,8 +240,8 @@ static void stroke_task(void *arg)
             stroke_event_t ev = stroke_detection_update(&s_stroke, t_s, ax, ay, az, gx, gy, gz, &m);
             auto_rotate_on_stroke_update(ev, t_s);
             if (ev != STROKE_EVENT_NONE) {
-                ESP_LOGI("STROKE", "ev=%d spm=%.1f drive=%.2fs rec=%.2fs",
-                         (int)ev, (double)m.spm, (double)m.drive_time_s, (double)m.recovery_time_s);
+                ESP_LOGI("STROKE", "ev=%d count=%lu spm=%.1f period=%.2fs",
+                         (int)ev, (unsigned long)m.stroke_count, (double)m.spm, (double)m.stroke_period_s);
             }
 
             if (s_auto_rotate_enabled) {
@@ -260,20 +260,31 @@ static void stroke_task(void *arg)
                 }
             }
 
+            static float s_last_valid_spm = NAN;
+            static float s_last_spm_t_s = -1.0f;
+            if (isfinite(m.spm) && m.spm >= 10.0f && m.spm <= 80.0f) {
+                s_last_valid_spm = m.spm;
+                s_last_spm_t_s = t_s;
+            }
+
             TickType_t now = xTaskGetTickCount();
             if ((now - last_ui_tick) >= ui_period) {
                 last_ui_tick = now;
+
+                float spm_out = s_last_valid_spm;
+                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_out = NAN;
 
                 data_values_t v = {
                     .time_s = t_s,
                     .distance_m = NAN,
                     .pace_s_per_500m = NAN,
                     .speed_mps = NAN,
-                    .spm = m.spm,
+                    .spm = spm_out,
                     .stroke_period_s = m.stroke_period_s,
                     .drive_time_s = m.drive_time_s,
                     .recovery_time_s = m.recovery_time_s,
                     .power_w = NAN,
+                    .stroke_count = m.stroke_count,
                 };
                 data_page_set_values(&v);
             }
@@ -358,8 +369,8 @@ void app_main(void)
     /* Default Data page metrics for rowing */
     const data_metric_t metrics[3] = {
         DATA_METRIC_SPM,
-        DATA_METRIC_DRIVE_TIME,
-        DATA_METRIC_RECOVERY_TIME,
+        DATA_METRIC_STROKE_COUNT,
+        DATA_METRIC_STROKE_PERIOD,
     };
     data_page_set_metrics(metrics, 3);
 

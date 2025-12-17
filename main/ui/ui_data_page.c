@@ -3,6 +3,7 @@
 
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "ui_theme.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -21,8 +22,8 @@ static lv_obj_t *s_slot_unit[DATA_SLOT_MAX] = {0};
 
 static data_metric_t s_slot_metric[DATA_SLOT_MAX] = {
     DATA_METRIC_SPM,
-    DATA_METRIC_DRIVE_TIME,
-    DATA_METRIC_RECOVERY_TIME,
+    DATA_METRIC_STROKE_COUNT,
+    DATA_METRIC_STROKE_PERIOD,
 };
 
 static data_values_t s_values = {0};
@@ -190,6 +191,10 @@ static void metric_title_unit(data_metric_t metric, const char **title, const ch
         *title = "Power";
         *unit = "W";
         break;
+    case DATA_METRIC_STROKE_COUNT:
+        *title = "Strokes";
+        *unit = "";
+        break;
     default:
         *title = "?";
         *unit = "";
@@ -252,6 +257,9 @@ static void apply_metric_to_slot(int idx)
             snprintf(value_buf, sizeof(value_buf), "%.0f", (double)s_values.power_w);
         }
         break;
+    case DATA_METRIC_STROKE_COUNT:
+        snprintf(value_buf, sizeof(value_buf), "%lu", (unsigned long)s_values.stroke_count);
+        break;
     default:
         snprintf(value_buf, sizeof(value_buf), "--");
         break;
@@ -279,11 +287,10 @@ static void slot_event_cb(lv_event_t *e)
 
 static void style_box(lv_obj_t *box)
 {
-    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(box, 1, 0);
-    lv_obj_set_style_border_color(box, lv_color_black(), 0);
+    ui_theme_apply_surface_border(box);
     lv_obj_set_style_radius(box, 0, 0);
-    lv_obj_set_style_pad_all(box, 10, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(box, LV_DIR_NONE);
 }
 
 static void build_slot(int idx)
@@ -296,16 +303,19 @@ static void build_slot(int idx)
 
     s_slot_title[idx] = lv_label_create(s_slot_box[idx]);
     lv_obj_set_style_text_font(s_slot_title[idx], DATA_FONT_TITLE, 0);
+    ui_theme_apply_label(s_slot_title[idx], true);
     lv_obj_align(s_slot_title[idx], LV_ALIGN_TOP_LEFT, 0, 0);
     lv_label_set_text(s_slot_title[idx], "?");
 
     s_slot_value[idx] = lv_label_create(s_slot_box[idx]);
     lv_obj_set_style_text_font(s_slot_value[idx], DATA_FONT_VALUE, 0);
+    ui_theme_apply_label(s_slot_value[idx], false);
     lv_obj_align(s_slot_value[idx], LV_ALIGN_CENTER, 0, 6);
     lv_label_set_text(s_slot_value[idx], "--");
 
     s_slot_unit[idx] = lv_label_create(s_slot_box[idx]);
     lv_obj_set_style_text_font(s_slot_unit[idx], DATA_FONT_UNIT, 0);
+    ui_theme_apply_label(s_slot_unit[idx], true);
     lv_obj_align(s_slot_unit[idx], LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     lv_label_set_text(s_slot_unit[idx], "");
 }
@@ -367,6 +377,9 @@ void data_page_create(lv_obj_t *parent)
     lv_obj_set_size(s_root, lv_pct(100), lv_pct(100));
     lv_obj_set_scrollbar_mode(s_root, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(s_root, LV_DIR_NONE);
+    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(s_root, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_root, 0, 0);
 
     for (int i = 0; i < DATA_SLOT_MAX; i++) {
         build_slot(i);
@@ -377,6 +390,21 @@ void data_page_create(lv_obj_t *parent)
 
     for (int i = 0; i < DATA_SLOT_MAX; i++) {
         apply_metric_to_slot(i);
+    }
+}
+
+void data_page_apply_theme(void)
+{
+    if (!s_root) return;
+
+    lv_obj_set_style_bg_opa(s_root, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_root, 0, 0);
+
+    for (int i = 0; i < DATA_SLOT_MAX; i++) {
+        if (s_slot_box[i]) style_box(s_slot_box[i]);
+        if (s_slot_title[i]) ui_theme_apply_label(s_slot_title[i], true);
+        if (s_slot_value[i]) ui_theme_apply_label(s_slot_value[i], false);
+        if (s_slot_unit[i]) ui_theme_apply_label(s_slot_unit[i], true);
     }
 }
 

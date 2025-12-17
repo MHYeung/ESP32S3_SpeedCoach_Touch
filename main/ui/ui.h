@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lvgl.h"
+#include <stdbool.h>
 
 void ui_init(lv_disp_t *disp);
 
@@ -12,13 +13,17 @@ typedef enum {
 } ui_orientation_t;
 
 typedef enum {
-    UI_PAGE_SETTINGS = 0,
+    UI_PAGE_DATA = 0,
+    UI_PAGE_SETTINGS = 1,
     UI_PAGE_COUNT,
 } ui_page_t;
 
 void ui_set_orientation(ui_orientation_t o);
 void ui_go_to_page(ui_page_t page, bool animated);
 
+/* Theme helpers (currently implemented as light/dark). */
+void ui_set_dark_mode(bool enabled);
+bool ui_get_dark_mode(void);
 
 typedef void (*ui_dark_mode_cb_t)(bool enabled);
 typedef void (*ui_auto_rotate_cb_t)(bool enabled);

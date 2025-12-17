@@ -19,6 +19,7 @@ typedef struct {
     float stroke_period_s;
     float drive_time_s;
     float recovery_time_s;
+    uint32_t stroke_count;
 
     // debug/telemetry (optional but useful)
     float a_long;        // projected dynamic accel (m/s^2)
@@ -61,6 +62,7 @@ typedef struct stroke_detection {
     float prev_t;
 
     float g_est[3];
+    int polarity; // +1 or -1, learns stroke direction
 
     int win_n;
     int win_i;
@@ -81,6 +83,19 @@ typedef struct stroke_detection {
 
     float rms2_ewma;
 
+    float g_rms2_ewma[3];
+    int best_g_axis; // 0=x 1=y 2=z
+    int g_hold_count;
+    float g_hpf_lp_state;
+    float g_lpf_y;
+    float prev_g_f;
+    float prev2_g_f;
+    bool polarity_locked;
+
+    uint32_t stroke_count;
+    float t_last_stroke;
+    bool have_last_stroke;
+
     int phase; // internal
 
     float t_last_catch;
@@ -89,6 +104,9 @@ typedef struct stroke_detection {
     bool have_catch;
     bool have_prev_catch;
     bool have_finish;
+
+    float peak_norm; // peak of (polarity * a_f) during drive
+    float t_last_event; // last accepted catch/finish (s)
 
     stroke_metrics_t last;
 } stroke_detection_t;

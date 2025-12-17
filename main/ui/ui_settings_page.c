@@ -1,7 +1,7 @@
 // main/ui/ui_settings_page.c
 #include "ui_settings_page.h"
 #include "ui.h"       // for ui_notify_* functions
-#include "ble.h"
+#include "ui_theme.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -28,15 +28,18 @@ static lv_obj_t *create_settings_row(lv_obj_t *parent,
 
     lv_obj_set_style_pad_all(row, 4, 0);
     lv_obj_set_style_border_width(row, 0, 0);
+    ui_theme_apply_surface(row);
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, label_txt);
+    ui_theme_apply_label(lbl, false);
     lv_obj_set_flex_grow(lbl, 1);
 
     lv_obj_t *sw = lv_switch_create(row);
     if (initial_state) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
+    ui_theme_apply_switch(sw);
     lv_obj_add_event_cb(sw, switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     return sw;
@@ -58,9 +61,11 @@ static lv_obj_t *create_value_row(lv_obj_t *parent,
 
     lv_obj_set_style_pad_all(row, 4, 0);
     lv_obj_set_style_border_width(row, 0, 0);
+    ui_theme_apply_surface(row);
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, label_txt);
+    ui_theme_apply_label(lbl, false);
     lv_obj_set_flex_grow(lbl, 1);
 
     lv_obj_t *val = lv_label_create(row);
@@ -69,6 +74,7 @@ static lv_obj_t *create_value_row(lv_obj_t *parent,
     } else {
         lv_label_set_text(val, "");
     }
+    ui_theme_apply_label(val, true);
 
     return val; // value-label, so caller can update text later
 }
@@ -91,244 +97,117 @@ static void sw_auto_rotate_event_cb(lv_event_t *e)
     ui_notify_auto_rotate_changed(on);
 }
 
-/* -------------------------------------------------------------------------- */
-/* BLE popup UI for manual connect                                            */
-/* -------------------------------------------------------------------------- */
-
-static lv_obj_t   *ble_dialog             = NULL;
-static lv_obj_t   *ble_list               = NULL;
-static lv_obj_t   *ble_status_label_popup = NULL;
-static lv_timer_t *ble_list_timer         = NULL;
-
 /* labels & widgets in main settings page */
+static lv_obj_t *s_root                    = NULL;
+static lv_obj_t *s_header                  = NULL;
+static lv_obj_t *s_body                    = NULL;
+static lv_obj_t *s_time_label              = NULL;
+static lv_obj_t *s_gps_label               = NULL;
+static lv_obj_t *s_batt_label              = NULL;
+static lv_timer_t *s_clock_timer           = NULL;
+static uint32_t s_clock_start_ms           = 0;
+static uint32_t s_clock_start_sec          = 12 * 3600; /* Dummy start: 12:00:00 */
+
+static lv_obj_t *s_dark_mode_sw            = NULL;
+
 static lv_obj_t *device_name_value_label   = NULL;
-static lv_obj_t *ble_status_value_label    = NULL;
-static lv_obj_t *ble_connection_row        = NULL;
-static lv_obj_t *ble_connection_button     = NULL;
-static lv_obj_t *ble_connection_name_label = NULL;
 
-static bool s_ble_callbacks_registered = false;
+static bool s_header_swipe_armed = false;
+static lv_point_t s_header_swipe_sum = {0};
 
-/* remember last selected device name for display */
-static char s_last_selected_name[BLE_NAME_MAX_LEN] = {0};
-
-static void ble_dialog_refresh_list(void);
-static void ble_dialog_device_clicked_cb(lv_event_t *e);
-static void ble_dialog_close_cb(lv_event_t *e);
-static void ble_list_timer_cb(lv_timer_t *t);
-static void ble_connect_btn_event_cb(lv_event_t *e);
-
-/* Refresh the device list inside the popup */
-static void ble_dialog_refresh_list(void)
+static void settings_header_swipe_cb(lv_event_t *e)
 {
-    if (!ble_dialog || !ble_list) {
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_indev_t *indev = (lv_indev_t *)lv_event_get_param(e);
+    if (!indev) return;
+
+    if (code == LV_EVENT_PRESSED) {
+        s_header_swipe_sum.x = 0;
+        s_header_swipe_sum.y = 0;
+        s_header_swipe_armed = true;
         return;
     }
 
-    lv_obj_clean(ble_list);
-
-    int count = ble_get_device_count();
-    char line[64];
-
-    for (int i = 0; i < count; ++i) {
-        ble_device_t dev;
-        if (!ble_get_device(i, &dev)) {
-            continue;
-        }
-
-        snprintf(line, sizeof(line), "%s (RSSI %d)",
-                 dev.name[0] ? dev.name : "Unknown",
-                 dev.rssi);
-
-        lv_obj_t *btn = lv_list_add_btn(ble_list, NULL, line);
-        lv_obj_set_user_data(btn, (void *)(intptr_t)i);
-        lv_obj_add_event_cb(btn, ble_dialog_device_clicked_cb, LV_EVENT_CLICKED, NULL);
+    if (code == LV_EVENT_RELEASED) {
+        s_header_swipe_armed = false;
+        return;
     }
 
-    char status[32];
-    snprintf(status, sizeof(status), "Found %d device(s)", count);
-    lv_label_set_text(ble_status_label_popup, status);
+    if (code != LV_EVENT_PRESSING) return;
+    if (!s_header_swipe_armed) return;
+
+    lv_point_t v;
+    lv_indev_get_vect(indev, &v);
+    s_header_swipe_sum.x += v.x;
+    s_header_swipe_sum.y += v.y;
+
+    const int32_t min_px = 30;
+    if (s_header_swipe_sum.y > -min_px) return;
+    if (LV_ABS(s_header_swipe_sum.y) < (LV_ABS(s_header_swipe_sum.x) + 10)) return;
+
+    s_header_swipe_armed = false;
+    lv_indev_stop_processing(indev);
+    lv_indev_wait_release(indev);
+    ui_go_to_page(UI_PAGE_DATA, true);
 }
 
-/* User tapped a device in the list */
-static void ble_dialog_device_clicked_cb(lv_event_t *e)
+static void settings_clock_update(void)
 {
-    lv_obj_t *btn = lv_event_get_target_obj(e);  // LVGL 9.x API
-    int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
+    if (!s_time_label) return;
 
-    // Save selected device name for later display
-    ble_device_t dev;
-    if (ble_get_device(idx, &dev)) {
-        dev.name[BLE_NAME_MAX_LEN - 1] = '\0';
-        strncpy(s_last_selected_name,
-                dev.name[0] ? dev.name : "Unknown",
-                BLE_NAME_MAX_LEN - 1);
-        s_last_selected_name[BLE_NAME_MAX_LEN - 1] = '\0';
-    } else {
-        strncpy(s_last_selected_name, "Unknown", BLE_NAME_MAX_LEN);
-    }
+    uint32_t now_ms = lv_tick_get();
+    uint32_t elapsed_s = (now_ms - s_clock_start_ms) / 1000;
+    uint32_t t = s_clock_start_sec + elapsed_s;
 
-    lv_label_set_text(ble_status_label_popup, "Connecting...");
+    uint32_t hh = (t / 3600) % 24;
+    uint32_t mm = (t / 60) % 60;
+    uint32_t ss = t % 60;
 
-    // Stop scanning while connecting
-    ble_stop_scan();
-    (void)ble_connect_to_index(idx);
-
-    // Close the dialog; main status will update via connection callback
-    if (ble_list_timer) {
-        lv_timer_del(ble_list_timer);
-        ble_list_timer = NULL;
-    }
-    if (ble_dialog) {
-        lv_obj_del(ble_dialog);
-        ble_dialog = NULL;
-    }
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02u:%02u:%02u", (unsigned)hh, (unsigned)mm, (unsigned)ss);
+    lv_label_set_text(s_time_label, buf);
 }
 
-/* Close (X) button in popup */
-static void ble_dialog_close_cb(lv_event_t *e)
-{
-    (void)e;
-
-    ble_stop_scan();
-
-    if (ble_list_timer) {
-        lv_timer_del(ble_list_timer);
-        ble_list_timer = NULL;
-    }
-    if (ble_dialog) {
-        lv_obj_del(ble_dialog);
-        ble_dialog = NULL;
-    }
-}
-
-/* Periodic timer: refresh device list while scanning */
-static void ble_list_timer_cb(lv_timer_t *t)
+static void settings_clock_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    if (!ble_dialog) {
-        if (ble_list_timer) {
-            lv_timer_del(ble_list_timer);
-            ble_list_timer = NULL;
-        }
+    settings_clock_update();
+}
+
+void settings_page_set_dark_mode_state(bool enabled)
+{
+    if (!s_dark_mode_sw) return;
+
+    if (enabled) lv_obj_add_state(s_dark_mode_sw, LV_STATE_CHECKED);
+    else lv_obj_clear_state(s_dark_mode_sw, LV_STATE_CHECKED);
+}
+
+void settings_page_set_gps_status(bool connected, uint8_t bars_0_to_4)
+{
+    if (!s_gps_label) return;
+
+    if (!connected) {
+        lv_label_set_text(s_gps_label, LV_SYMBOL_GPS " " LV_SYMBOL_CLOSE);
         return;
     }
 
-    ble_dialog_refresh_list();
-}
+    uint8_t bars = bars_0_to_4;
+    if (bars > 4) bars = 4;
 
-/* Create and show the BLE popup dialog */
-static void ble_dialog_open(void)
-{
-    if (ble_dialog) {
-        // Already open
+    if (bars == 0) {
+        lv_label_set_text(s_gps_label, LV_SYMBOL_GPS " " LV_SYMBOL_WARNING);
         return;
     }
 
-    // Start scanning
-    ble_start_scan();
-
-    // Create dialog on top layer so it stays above tabs (LVGL 9.x)
-    ble_dialog = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(ble_dialog, 230, 200);
-    lv_obj_center(ble_dialog);
-
-    // "Modal-like" behaviour for LVGL 9.x
-    lv_obj_add_flag(ble_dialog, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(ble_dialog, LV_OBJ_FLAG_EVENT_BUBBLE);
-
-    lv_obj_set_style_bg_color(ble_dialog, lv_color_hex(0x006df6), 0);
-    lv_obj_set_style_radius(ble_dialog, 10, 0);
-    lv_obj_set_style_pad_all(ble_dialog, 10, 0);
-    lv_obj_set_style_border_width(ble_dialog, 0, 0);
-
-    // Title
-    lv_obj_t *title = lv_label_create(ble_dialog);
-    lv_label_set_text(title, "BLE: Select device");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
-
-    // Status label
-    ble_status_label_popup = lv_label_create(ble_dialog);
-    lv_label_set_text(ble_status_label_popup, "Scanning...");
-    lv_obj_align(ble_status_label_popup, LV_ALIGN_TOP_LEFT, 0, 20);
-
-    // Device list
-    ble_list = lv_list_create(ble_dialog);
-    lv_obj_set_size(ble_list, 210, 130);
-    lv_obj_align(ble_list, LV_ALIGN_BOTTOM_MID, 0, 0);
-
-    // Close button
-    lv_obj_t *close_btn = lv_btn_create(ble_dialog);
-    lv_obj_set_size(close_btn, 24, 24);
-    lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_add_event_cb(close_btn, ble_dialog_close_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *x_label = lv_label_create(close_btn);
-    lv_label_set_text(x_label, LV_SYMBOL_CLOSE);
-    lv_obj_center(x_label);
-
-    // Timer to refresh list while scanning
-    ble_list_timer = lv_timer_create(ble_list_timer_cb, 500, NULL);
-}
-
-/* Button handler on Settings row: open BLE dialog */
-static void ble_connect_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-    ble_dialog_open();
-}
-
-/* -------------------------------------------------------------------------- */
-/* BLE connection-state callback -> updates status row & connection row       */
-/* -------------------------------------------------------------------------- */
-
-static void on_ble_connection_state(bool connected)
-{
-    // Update simple "BLE status" row
-    if (ble_status_value_label) {
-        lv_label_set_text(ble_status_value_label,
-                          connected ? "Connected" : "Disconnected");
+    char bars_txt[5];
+    for (uint8_t i = 0; i < bars; i++) {
+        bars_txt[i] = '|';
     }
+    bars_txt[bars] = '\0';
 
-    if (!ble_connection_row) {
-        return;
-    }
-
-    if (connected) {
-        // When connected: remove button and show "Connected: <name>"
-        if (ble_connection_button) {
-            lv_obj_del(ble_connection_button);
-            ble_connection_button = NULL;
-        }
-
-        if (!ble_connection_name_label) {
-            // Create value-label on the right of the row
-            ble_connection_name_label = lv_label_create(ble_connection_row);
-        }
-
-        char buf[BLE_NAME_MAX_LEN + 20];
-        const char *name = s_last_selected_name[0] ? s_last_selected_name : "Unknown";
-        snprintf(buf, sizeof(buf), "Connected: %s", name);
-        lv_label_set_text(ble_connection_name_label, buf);
-    } else {
-        // When disconnected: remove name label and show Connect button again
-        if (ble_connection_name_label) {
-            lv_obj_del(ble_connection_name_label);
-            ble_connection_name_label = NULL;
-        }
-
-        if (!ble_connection_button) {
-            ble_connection_button = lv_btn_create(ble_connection_row);
-            lv_obj_set_size(ble_connection_button, 90, 30);
-            lv_obj_add_event_cb(ble_connection_button,
-                                ble_connect_btn_event_cb,
-                                LV_EVENT_CLICKED, NULL);
-
-            lv_obj_t *btn_lbl = lv_label_create(ble_connection_button);
-            lv_label_set_text(btn_lbl, "Connect");
-            lv_obj_center(btn_lbl);
-        }
-    }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%s %s%s", LV_SYMBOL_GPS, LV_SYMBOL_WIFI, bars_txt);
+    lv_label_set_text(s_gps_label, buf);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -337,69 +216,115 @@ static void on_ble_connection_state(bool connected)
 
 void settings_page_create(lv_obj_t *parent)
 {
-    lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_set_size(cont, lv_pct(100), lv_pct(100));
-    lv_obj_center(cont);
+    s_root = lv_obj_create(parent);
+    lv_obj_set_size(s_root, lv_pct(100), lv_pct(100));
+    lv_obj_center(s_root);
+    lv_obj_set_style_border_width(s_root, 0, 0);
+    lv_obj_set_style_bg_opa(s_root, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(s_root, 0, 0);
+    lv_obj_set_flex_flow(s_root, LV_FLEX_FLOW_COLUMN);
+    lv_obj_add_flag(s_root, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(cont, 10, 0);
-    lv_obj_set_style_pad_row(cont, 10, 0);
-    lv_obj_set_style_border_width(cont, 0, 0);
+    /* Header/status bar (top ~10%) */
+    s_header = lv_obj_create(s_root);
+    ui_theme_apply_surface(s_header);
+    lv_obj_set_width(s_header, lv_pct(100));
+    lv_obj_set_height(s_header, lv_pct(10));
+    lv_obj_set_style_radius(s_header, 0, 0);
+    lv_obj_set_style_border_width(s_header, 0, 0);
+    lv_obj_set_style_pad_hor(s_header, 10, 0);
+    lv_obj_set_style_pad_ver(s_header, 6, 0);
+    lv_obj_add_flag(s_header, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_header, settings_header_swipe_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(s_header, settings_header_swipe_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(s_header, settings_header_swipe_cb, LV_EVENT_RELEASED, NULL);
+
+    /* 3-column grid: time | GPS | battery */
+    static int32_t s_hdr_cols[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
+    static int32_t s_hdr_rows[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
+    lv_obj_set_layout(s_header, LV_LAYOUT_GRID);
+    lv_obj_set_grid_dsc_array(s_header, s_hdr_cols, s_hdr_rows);
+
+    s_time_label = lv_label_create(s_header);
+    ui_theme_apply_label(s_time_label, false);
+    lv_obj_add_flag(s_time_label, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_label_set_long_mode(s_time_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(s_time_label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_grid_cell(s_time_label, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+
+    s_gps_label = lv_label_create(s_header);
+    lv_label_set_text(s_gps_label, "");
+    ui_theme_apply_label(s_gps_label, true);
+    lv_obj_add_flag(s_gps_label, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_text_align(s_gps_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_gps_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_grid_cell(s_gps_label, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    settings_page_set_gps_status(false, 0);
+
+    s_batt_label = lv_label_create(s_header);
+    lv_label_set_text(s_batt_label, "BAT: --%");
+    ui_theme_apply_label(s_batt_label, true);
+    lv_obj_add_flag(s_batt_label, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_label_set_long_mode(s_batt_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(s_batt_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_grid_cell(s_batt_label, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+
+    s_clock_start_ms = lv_tick_get();
+    if (!s_clock_timer) {
+        s_clock_timer = lv_timer_create(settings_clock_timer_cb, 1000, NULL);
+    }
+    settings_clock_update();
+
+    /* Body (remaining ~90%) */
+    s_body = lv_obj_create(s_root);
+    lv_obj_set_width(s_body, lv_pct(100));
+    lv_obj_set_flex_grow(s_body, 1);
+    lv_obj_set_style_border_width(s_body, 0, 0);
+    lv_obj_set_style_bg_opa(s_body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(s_body, 10, 0);
+    lv_obj_set_style_pad_row(s_body, 10, 0);
+    lv_obj_set_flex_flow(s_body, LV_FLEX_FLOW_COLUMN);
 
     /* Dark mode row */
-    create_settings_row(cont,
-                        "Dark mode",
-                        sw_dark_mode_event_cb,
-                        false);
+    s_dark_mode_sw = create_settings_row(s_body,
+                                         "Dark mode",
+                                         sw_dark_mode_event_cb,
+                                         ui_get_dark_mode());
+    settings_page_set_dark_mode_state(ui_get_dark_mode());
 
     /* Auto rotate row */
-    create_settings_row(cont,
+    create_settings_row(s_body,
                         "Auto rotate",
                         sw_auto_rotate_event_cb,
                         true);
 
     /* Device name row (static for now, must match ble.c name) */
-    device_name_value_label = create_value_row(cont,
+    device_name_value_label = create_value_row(s_body,
                                                "Device",
                                                "ESP32S3-BLE");
+}
 
-    /* BLE connection status row */
-    ble_status_value_label = create_value_row(cont,
-                                              "BLE status",
-                                              "Disconnected");
-
-    /* BLE connection row:
-       label on left, Connect button on right,
-       which will be replaced by "Connected: <name>" when connected. */
-    ble_connection_row = lv_obj_create(cont);
-    lv_obj_set_width(ble_connection_row, lv_pct(100));
-    lv_obj_set_height(ble_connection_row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(ble_connection_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ble_connection_row,
-                          LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(ble_connection_row, 4, 0);
-    lv_obj_set_style_border_width(ble_connection_row, 0, 0);
-
-    lv_obj_t *ble_conn_lbl = lv_label_create(ble_connection_row);
-    lv_label_set_text(ble_conn_lbl, "BLE connection");
-    lv_obj_set_flex_grow(ble_conn_lbl, 1);
-
-    // Initial Connect button
-    ble_connection_button = lv_btn_create(ble_connection_row);
-    lv_obj_set_size(ble_connection_button, 90, 30);
-    lv_obj_add_event_cb(ble_connection_button,
-                        ble_connect_btn_event_cb,
-                        LV_EVENT_CLICKED, NULL);
-    lv_obj_t *btn_lbl = lv_label_create(ble_connection_button);
-    lv_label_set_text(btn_lbl, "Connect");
-    lv_obj_center(btn_lbl);
-
-    /* Register BLE callbacks once so status & connection row update
-       when connect / disconnect events happen. */
-    if (!s_ble_callbacks_registered) {
-        ble_register_connection_state_callback(on_ble_connection_state);
-        s_ble_callbacks_registered = true;
+void settings_page_apply_theme(void)
+{
+    if (s_root) {
+        lv_obj_set_style_bg_opa(s_root, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(s_root, 0, 0);
     }
+
+    if (s_header) {
+        ui_theme_apply_surface(s_header);
+        lv_obj_set_style_radius(s_header, 0, 0);
+        lv_obj_set_style_border_width(s_header, 0, 0);
+    }
+    if (s_time_label) ui_theme_apply_label(s_time_label, false);
+    if (s_gps_label) ui_theme_apply_label(s_gps_label, true);
+    if (s_batt_label) ui_theme_apply_label(s_batt_label, true);
+
+    if (s_body) {
+        lv_obj_set_style_bg_opa(s_body, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(s_body, 0, 0);
+    }
+
+    if (device_name_value_label) ui_theme_apply_label(device_name_value_label, true);
+    settings_page_set_dark_mode_state(ui_get_dark_mode());
 }
