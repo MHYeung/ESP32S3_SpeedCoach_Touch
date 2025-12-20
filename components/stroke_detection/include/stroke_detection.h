@@ -4,6 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef STROKE_THR_K_DEFAULT
+#define STROKE_THR_K_DEFAULT 1.0f
+#endif
+
+#ifndef STROKE_THR_FLOOR_DEFAULT
+#define STROKE_THR_FLOOR_DEFAULT 0.85f
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,6 +44,8 @@ typedef struct {
     // variance window for axis auto-detect
     float axis_window_s;         // 3–5 seconds
     float axis_hold_s;           // e.g. 0.5 seconds stable before switching
+    bool accel_use_fixed_axis;   // if true, skip auto-detect and use accel_fixed_axis
+    int accel_fixed_axis;        // 0=x, 1=y, 2=z
 
     // filters for a_long (simple HPF + LPF)
     float hpf_hz;                // ~0.5
@@ -91,6 +101,7 @@ typedef struct stroke_detection {
     float prev_g_f;
     float prev2_g_f;
     bool polarity_locked;
+    bool accel_axis_fixed;
 
     uint32_t stroke_count;
     float t_last_stroke;
@@ -107,6 +118,11 @@ typedef struct stroke_detection {
 
     float peak_norm; // peak of (polarity * a_f) during drive
     float t_last_event; // last accepted catch/finish (s)
+
+    float period_hist[3];
+    int period_hist_count;
+    int period_hist_i;
+    float period_hist_sum;
 
     stroke_metrics_t last;
 } stroke_detection_t;

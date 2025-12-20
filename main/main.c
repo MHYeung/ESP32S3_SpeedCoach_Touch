@@ -211,12 +211,14 @@ static void stroke_task(void *arg)
         .gravity_tau_s = 0.8f,
         .axis_window_s = 4.0f,
         .axis_hold_s = 0.5f,
+        .accel_use_fixed_axis = true,  // accel is strongest along screen normal
+        .accel_fixed_axis = 2,         // Z-axis
         .hpf_hz = 0.2f,
         .lpf_hz = 1.2f,
         .min_stroke_period_s = 0.8f,
         .max_stroke_period_s = 5.0f,
-        .thr_k = 1.0f,
-        .thr_floor = 0.10f,
+        .thr_k = STROKE_THR_K_DEFAULT,
+        .thr_floor = STROKE_THR_FLOOR_DEFAULT,
     };
 
     stroke_detection_init(&s_stroke, &cfg);
@@ -273,6 +275,9 @@ static void stroke_task(void *arg)
 
                 float spm_out = s_last_valid_spm;
                 if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_out = NAN;
+                if (isfinite(spm_out)) {
+                    spm_out = roundf(spm_out); // keep SPM stable and integer
+                }
 
                 data_values_t v = {
                     .time_s = t_s,
@@ -280,9 +285,6 @@ static void stroke_task(void *arg)
                     .pace_s_per_500m = NAN,
                     .speed_mps = NAN,
                     .spm = spm_out,
-                    .stroke_period_s = m.stroke_period_s,
-                    .drive_time_s = m.drive_time_s,
-                    .recovery_time_s = m.recovery_time_s,
                     .power_w = NAN,
                     .stroke_count = m.stroke_count,
                 };
@@ -368,9 +370,9 @@ void app_main(void)
 
     /* Default Data page metrics for rowing */
     const data_metric_t metrics[3] = {
-        DATA_METRIC_SPM,
+        DATA_METRIC_TIME,
         DATA_METRIC_STROKE_COUNT,
-        DATA_METRIC_STROKE_PERIOD,
+        DATA_METRIC_SPM,
     };
     data_page_set_metrics(metrics, 3);
 

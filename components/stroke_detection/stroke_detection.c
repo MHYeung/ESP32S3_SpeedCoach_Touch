@@ -41,6 +41,34 @@ static void axis_window_push(struct stroke_detection *sd, float ax, float ay, fl
     sd->win_i = (i + 1) % sd->win_n;
 }
 
+static void period_hist_reset(stroke_detection_t *sd)
+{
+    sd->period_hist_count = 0;
+    sd->period_hist_i = 0;
+    sd->period_hist_sum = 0.0f;
+}
+
+static void period_hist_push(stroke_detection_t *sd, float period)
+{
+    if (sd->period_hist_count < 3) {
+        sd->period_hist[sd->period_hist_i] = period;
+        sd->period_hist_sum += period;
+        sd->period_hist_count++;
+        sd->period_hist_i = (sd->period_hist_i + 1) % 3;
+    } else {
+        sd->period_hist_sum -= sd->period_hist[sd->period_hist_i];
+        sd->period_hist[sd->period_hist_i] = period;
+        sd->period_hist_sum += period;
+        sd->period_hist_i = (sd->period_hist_i + 1) % 3;
+    }
+}
+
+static float period_hist_mean(const stroke_detection_t *sd)
+{
+    if (sd->period_hist_count <= 0) return NAN;
+    return sd->period_hist_sum / (float)sd->period_hist_count;
+}
+
 static float axis_variance(const struct stroke_detection *sd, int axis)
 {
     const int n = sd->win_count > 0 ? sd->win_count : 1;
@@ -62,6 +90,13 @@ void stroke_detection_init(stroke_detection_t *sd_, const stroke_detection_cfg_t
     if (sd->hold_n < 1) sd->hold_n = 1;
 
     sd->best_axis = 0;
+    sd->accel_axis_fixed = cfg->accel_use_fixed_axis;
+    if (sd->accel_axis_fixed) {
+        int fixed = cfg->accel_fixed_axis;
+        if (fixed < 0) fixed = 0;
+        if (fixed > 2) fixed = 2;
+        sd->best_axis = fixed;
+    }
     sd->polarity = +1;
     sd->best_g_axis = 0;
     sd->g_hold_count = 0;
@@ -86,6 +121,7 @@ void stroke_detection_init(stroke_detection_t *sd_, const stroke_detection_cfg_t
     sd->last.g_mag = NAN;
 
     // initialize buffers to 0 (already from memset)
+    period_hist_reset(sd);
 }
 
 stroke_event_t stroke_detection_update(stroke_detection_t *sd_,
@@ -113,16 +149,18 @@ stroke_event_t stroke_detection_update(stroke_detection_t *sd_,
 
     // Stage 2: axis auto-detect via accel variance window (telemetry / optional)
     axis_window_push(sd, a_dyn[0], a_dyn[1], a_dyn[2]);
-    float vx = axis_variance(sd, 0), vy = axis_variance(sd, 1), vz = axis_variance(sd, 2);
-    int candidate = (vy > vx) ? 1 : 0;
-    if ((candidate == 0 ? vx : vy) < vz) candidate = 2;
+    if (!sd->accel_axis_fixed) {
+        float vx = axis_variance(sd, 0), vy = axis_variance(sd, 1), vz = axis_variance(sd, 2);
+        int candidate = (vy > vx) ? 1 : 0;
+        if ((candidate == 0 ? vx : vy) < vz) candidate = 2;
 
-    if (candidate == sd->best_axis) {
-        sd->hold_count = 0;
-    } else {
-        if (++sd->hold_count >= sd->hold_n) {
-            sd->best_axis = candidate;
+        if (candidate == sd->best_axis) {
             sd->hold_count = 0;
+        } else {
+            if (++sd->hold_count >= sd->hold_n) {
+                sd->best_axis = candidate;
+                sd->hold_count = 0;
+            }
         }
     }
 
@@ -204,6 +242,7 @@ stroke_event_t stroke_detection_update(stroke_detection_t *sd_,
         sd->have_last_stroke = false;
         sd->t_last_stroke = -1.0f;
         sd->t_last_event = t_s;
+        period_hist_reset(sd);
     }
 
     /* Use gyro magnitude to reject slow tilts: tilting changes accel but has low gyro energy
@@ -233,9 +272,12 @@ stroke_event_t stroke_detection_update(stroke_detection_t *sd_,
                 sd->t_last_stroke = -1.0f;
                 sd->last.stroke_period_s = NAN;
                 sd->last.spm = NAN;
+                period_hist_reset(sd);
             } else {
-                sd->last.stroke_period_s = period;
-                sd->last.spm = 60.0f / period;
+                period_hist_push(sd, period);
+                float mean_period = period_hist_mean(sd);
+                sd->last.stroke_period_s = mean_period;
+                sd->last.spm = isfinite(mean_period) && mean_period > 0.0f ? 60.0f / mean_period : NAN;
             }
         }
 
@@ -243,6 +285,7 @@ stroke_event_t stroke_detection_update(stroke_detection_t *sd_,
             if (!sd->have_last_stroke) {
                 sd->last.stroke_period_s = NAN;
                 sd->last.spm = NAN;
+                period_hist_reset(sd);
             }
 
             sd->t_last_stroke = peak_t;

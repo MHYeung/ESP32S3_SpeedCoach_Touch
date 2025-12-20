@@ -10,9 +10,6 @@ typedef enum {
     DATA_METRIC_DISTANCE,
     DATA_METRIC_SPEED,
     DATA_METRIC_SPM,
-    DATA_METRIC_STROKE_PERIOD,
-    DATA_METRIC_DRIVE_TIME,
-    DATA_METRIC_RECOVERY_TIME,
     DATA_METRIC_POWER,
     DATA_METRIC_STROKE_COUNT,
     DATA_METRIC_COUNT
@@ -24,9 +21,6 @@ typedef struct {
     float pace_s_per_500m;
     float speed_mps;
     float spm;
-    float stroke_period_s;
-    float drive_time_s;
-    float recovery_time_s;
     float power_w;
     uint32_t stroke_count;
 } data_values_t;

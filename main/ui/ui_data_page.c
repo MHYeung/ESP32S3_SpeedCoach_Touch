@@ -21,9 +21,9 @@ static lv_obj_t *s_slot_value[DATA_SLOT_MAX] = {0};
 static lv_obj_t *s_slot_unit[DATA_SLOT_MAX] = {0};
 
 static data_metric_t s_slot_metric[DATA_SLOT_MAX] = {
-    DATA_METRIC_SPM,
+    DATA_METRIC_TIME,
     DATA_METRIC_STROKE_COUNT,
-    DATA_METRIC_STROKE_PERIOD,
+    DATA_METRIC_SPM,
 };
 
 static data_values_t s_values = {0};
@@ -130,7 +130,7 @@ static void fmt_distance_m(float m, char *value_out, size_t value_len, const cha
 {
     if (!isfinite(m) || m < 0.0f) {
         snprintf(value_out, value_len, "--");
-        *unit_out = "";
+        *unit_out = "m";
         return;
     }
 
@@ -174,18 +174,6 @@ static void metric_title_unit(data_metric_t metric, const char **title, const ch
     case DATA_METRIC_SPM:
         *title = "SPM";
         *unit = "";
-        break;
-    case DATA_METRIC_STROKE_PERIOD:
-        *title = "Stroke";
-        *unit = "s";
-        break;
-    case DATA_METRIC_DRIVE_TIME:
-        *title = "Drive";
-        *unit = "s";
-        break;
-    case DATA_METRIC_RECOVERY_TIME:
-        *title = "Recovery";
-        *unit = "s";
         break;
     case DATA_METRIC_POWER:
         *title = "Power";
@@ -238,17 +226,9 @@ static void apply_metric_to_slot(int idx)
         if (!isfinite(s_values.spm) || s_values.spm < 0.0f) {
             snprintf(value_buf, sizeof(value_buf), "--");
         } else {
-            snprintf(value_buf, sizeof(value_buf), "%.1f", (double)s_values.spm);
+            float spm_int = roundf(s_values.spm);
+            snprintf(value_buf, sizeof(value_buf), "%.0f", (double)spm_int);
         }
-        break;
-    case DATA_METRIC_STROKE_PERIOD:
-        fmt_seconds(s_values.stroke_period_s, value_buf, sizeof(value_buf));
-        break;
-    case DATA_METRIC_DRIVE_TIME:
-        fmt_seconds(s_values.drive_time_s, value_buf, sizeof(value_buf));
-        break;
-    case DATA_METRIC_RECOVERY_TIME:
-        fmt_seconds(s_values.recovery_time_s, value_buf, sizeof(value_buf));
         break;
     case DATA_METRIC_POWER:
         if (!isfinite(s_values.power_w) || s_values.power_w < 0.0f) {
