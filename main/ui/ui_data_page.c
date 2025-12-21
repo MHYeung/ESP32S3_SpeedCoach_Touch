@@ -49,25 +49,25 @@ extern const lv_font_t lv_font_montserrat_16;
 #define DATA_FONT_TITLE (LV_FONT_DEFAULT)
 #endif
 
-#if defined(LV_FONT_MONTSERRAT_40) && LV_FONT_MONTSERRAT_40
+#if defined(LV_FONT_MONTSERRAT_44) && LV_FONT_MONTSERRAT_44
+extern const lv_font_t lv_font_montserrat_44;
+#define DATA_FONT_VALUE (&lv_font_montserrat_44)
+#elif defined(LV_FONT_MONTSERRAT_40) && LV_FONT_MONTSERRAT_40
 extern const lv_font_t lv_font_montserrat_40;
 #define DATA_FONT_VALUE (&lv_font_montserrat_40)
 #elif defined(LV_FONT_MONTSERRAT_36) && LV_FONT_MONTSERRAT_36
 extern const lv_font_t lv_font_montserrat_36;
 #define DATA_FONT_VALUE (&lv_font_montserrat_36)
-#elif defined(LV_FONT_MONTSERRAT_28) && LV_FONT_MONTSERRAT_28
-extern const lv_font_t lv_font_montserrat_28;
-#define DATA_FONT_VALUE (&lv_font_montserrat_28)
 #else
 #define DATA_FONT_VALUE (LV_FONT_DEFAULT)
 #endif
 
-#if defined(LV_FONT_MONTSERRAT_32) && LV_FONT_MONTSERRAT_32
+#if defined(LV_FONT_MONTSERRAT_36) && LV_FONT_MONTSERRAT_36
+extern const lv_font_t lv_font_montserrat_36;
+#define DATA_FONT_VALUE_SMALL (&lv_font_montserrat_36)
+#elif defined(LV_FONT_MONTSERRAT_32) && LV_FONT_MONTSERRAT_32
 extern const lv_font_t lv_font_montserrat_32;
 #define DATA_FONT_VALUE_SMALL (&lv_font_montserrat_32)
-#elif defined(LV_FONT_MONTSERRAT_28) && LV_FONT_MONTSERRAT_28
-extern const lv_font_t lv_font_montserrat_28;
-#define DATA_FONT_VALUE_SMALL (&lv_font_montserrat_28)
 #else
 #define DATA_FONT_VALUE_SMALL (DATA_FONT_VALUE)
 #endif

@@ -14,7 +14,9 @@ typedef enum {
 
 typedef enum {
     UI_PAGE_DATA = 0,
-    UI_PAGE_SETTINGS = 1,
+    UI_PAGE_MENU = 1,
+    UI_ACTIVITY_SUMMARY_PAGE = 2,
+    UI_PAGE_SETTINGS = 3,
     UI_PAGE_COUNT,
 } ui_page_t;
 
