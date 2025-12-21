@@ -4,6 +4,7 @@ idf_component_register(
         "ui/ui_core.c"
         "ui/ui_settings_page.c"
         "ui/ui_data_page.c"
+        "ui/ui_status_bar.c"
         "ui/ui_theme.c"
     INCLUDE_DIRS
         "."
