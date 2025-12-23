@@ -139,6 +139,11 @@ static void pwr_evt_cb(pwr_key_event_t evt, void *user)
         case PWR_KEY_EVT_ACTIVITY_TOGGLE:
             s_activity_recording = !s_activity_recording;
             ESP_LOGI(TAG, "Activity recording: %s", s_activity_recording ? "START" : "STOP");
+            // 1) Move to data page (animated)
+            ui_go_to_page(UI_PAGE_DATA, true);
+
+            // 2) Show overlay icon (green start / red stop)
+            data_page_show_activity_toast(s_activity_recording);
             break;
 
         case PWR_KEY_EVT_SHUTDOWN_PROMPT:
@@ -163,8 +168,9 @@ static void app_pwr_key_setup(void)
         .key_active_low = true,
         .debounce_ms = 30,
         .poll_ms = 20,
-        .toggle_hold_ms = 1600,
-        .prompt_hold_ms = 5000,
+        .click_max_ms = 600,
+        //.toggle_hold_ms = 1600,
+        .prompt_hold_ms = 3000,
     };
     ESP_ERROR_CHECK(pwr_key_init(&cfg, pwr_evt_cb, NULL));
 

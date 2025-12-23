@@ -39,6 +39,7 @@ static void pwr_key_task(void *arg)
     int64_t press_start_ms = -1;
 
     bool prompt_fired = false;
+    //bool toggle_fired = false;
 
     while (1) {
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -53,33 +54,34 @@ static void pwr_key_task(void *arg)
             debounced = raw;
         }
 
-        // Debounced press edge
+        // press edge
         if (debounced && !pressed) {
             pressed = true;
             press_start_ms = now_ms;
             prompt_fired = false;
         }
 
-        // While pressed, fire the 10s prompt once when threshold is reached
+        // while pressed: shutdown prompt at >=10s
         if (pressed && press_start_ms >= 0 && !prompt_fired) {
             int64_t held = now_ms - press_start_ms;
             if ((uint32_t)held >= s_cfg.prompt_hold_ms) {
                 prompt_fired = true;
                 if (s_cb) s_cb(PWR_KEY_EVT_SHUTDOWN_PROMPT, s_user);
-                // Do NOT auto-shutdown here; UI will ask user.
             }
         }
 
-        // Debounced release edge
+        // release edge
         if (!debounced && pressed) {
             pressed = false;
             int64_t held = (press_start_ms >= 0) ? (now_ms - press_start_ms) : 0;
 
             if (!prompt_fired) {
-                if ((uint32_t)held >= s_cfg.toggle_hold_ms) {
+                // only count as a click if it’s short enough
+                if ((uint32_t)held <= s_cfg.click_max_ms) {
                     if (s_cb) s_cb(PWR_KEY_EVT_ACTIVITY_TOGGLE, s_user);
                 } else {
-                    if (s_cb) s_cb(PWR_KEY_EVT_SHORT_PRESS, s_user);
+                    // optional: ignore (prevents UX bug)
+                    // if (s_cb) s_cb(PWR_KEY_EVT_SHORT_PRESS, s_user);
                 }
             }
 
@@ -100,7 +102,8 @@ esp_err_t pwr_key_init(const pwr_key_config_t *cfg, pwr_key_cb_t cb, void *user)
 
     if (s_cfg.debounce_ms == 0) s_cfg.debounce_ms = 30;
     if (s_cfg.poll_ms == 0) s_cfg.poll_ms = 20;
-    if (s_cfg.toggle_hold_ms == 0) s_cfg.toggle_hold_ms = 2000;
+    if(s_cfg.click_max_ms == 0) s_cfg.click_max_ms = 600;
+    //if (s_cfg.toggle_hold_ms == 0) s_cfg.toggle_hold_ms = 2000;
     if (s_cfg.prompt_hold_ms == 0) s_cfg.prompt_hold_ms = 5000;
 
     // KEY input

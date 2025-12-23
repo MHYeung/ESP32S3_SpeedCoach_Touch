@@ -31,3 +31,5 @@ void data_page_set_metrics(const data_metric_t metrics[], size_t count); // per 
 void data_page_set_values(const data_values_t *v);
 void data_page_apply_theme(void);
 
+// Show a temporary overlay icon (green start / red stop)
+void data_page_show_activity_toast(bool recording);

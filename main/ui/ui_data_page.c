@@ -19,6 +19,8 @@ static lv_obj_t *s_slot_box[DATA_SLOT_MAX] = {0};
 static lv_obj_t *s_slot_title[DATA_SLOT_MAX] = {0};
 static lv_obj_t *s_slot_value[DATA_SLOT_MAX] = {0};
 static lv_obj_t *s_slot_unit[DATA_SLOT_MAX] = {0};
+static lv_obj_t *s_activity_toast = NULL;
+static lv_timer_t *s_activity_toast_timer = NULL;
 
 static data_metric_t s_slot_metric[DATA_SLOT_MAX] = {
     DATA_METRIC_TIME,
@@ -350,6 +352,72 @@ static void apply_layout(void)
                              LV_GRID_ALIGN_STRETCH, 2, 1);                     
     }
 }
+
+static void activity_toast_hide_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (s_activity_toast) {
+        lv_obj_del(s_activity_toast);
+        s_activity_toast = NULL;
+    }
+    if (s_activity_toast_timer) {
+        lv_timer_del(s_activity_toast_timer);
+        s_activity_toast_timer = NULL;
+    }
+}
+
+static void activity_toast_create_async(void *param)
+{
+    bool recording = (bool)(uintptr_t)param;
+
+    // remove old toast if exists
+    if (s_activity_toast) {
+        lv_obj_del(s_activity_toast);
+        s_activity_toast = NULL;
+    }
+    if (s_activity_toast_timer) {
+        lv_timer_del(s_activity_toast_timer);
+        s_activity_toast_timer = NULL;
+    }
+
+    lv_obj_t *top = lv_layer_top();
+
+    // round pill/circle toast
+    s_activity_toast = lv_obj_create(top);
+    lv_obj_set_size(s_activity_toast, 90, 90);
+    lv_obj_set_style_radius(s_activity_toast, 45, 0);
+    lv_obj_set_style_border_width(s_activity_toast, 0, 0);
+    lv_obj_set_style_bg_opa(s_activity_toast, LV_OPA_80, 0);
+
+    // green for start, red for stop
+    lv_color_t bg = recording ? lv_palette_main(LV_PALETTE_GREEN)
+                              : lv_palette_main(LV_PALETTE_RED);
+    lv_obj_set_style_bg_color(s_activity_toast, bg, 0);
+
+    lv_obj_clear_flag(s_activity_toast, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_activity_toast, LV_OBJ_FLAG_CLICKABLE);
+
+    // place near top-right (like a “status overlay”)
+    lv_obj_center(s_activity_toast);
+
+    // icon label
+    lv_obj_t *lbl = lv_label_create(s_activity_toast);
+    lv_label_set_text(lbl, recording ? LV_SYMBOL_PLAY : LV_SYMBOL_STOP);
+    lv_obj_set_style_text_font(lbl, DATA_FONT_VALUE /* or &lv_font_montserrat_44 */, 0);
+    /* Icon text should remain white; background indicates state */
+    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+    lv_obj_center(lbl);
+
+    // auto-hide after 1.2s
+    s_activity_toast_timer = lv_timer_create(activity_toast_hide_cb, 1200, NULL);
+}
+
+void data_page_show_activity_toast(bool recording)
+{
+    // Safe from any task: schedule on LVGL thread
+    lv_async_call(activity_toast_create_async, (void *)(uintptr_t)recording);
+}
+
 
 void data_page_create(lv_obj_t *parent)
 {
