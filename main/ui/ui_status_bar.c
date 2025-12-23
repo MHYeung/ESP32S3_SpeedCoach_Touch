@@ -1,6 +1,9 @@
 // main/ui/ui_status_bar.c
 #include "ui_status_bar.h"
 #include "ui_theme.h"
+#include "rtc_pcf85063.h"
+
+#include "esp_err.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -9,6 +12,18 @@ static void status_bar_clock_update(ui_status_bar_t *bar)
 {
     if (!bar || !bar->time_label) return;
 
+    // --- Preferred: RTC time ---
+    datetime_t rtc;
+    esp_err_t err = PCF85063_read_time(&rtc);
+    if (err == ESP_OK) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
+                 (unsigned)rtc.hour, (unsigned)rtc.minute, (unsigned)rtc.second);
+        lv_label_set_text(bar->time_label, buf);
+        return;
+    }
+
+    // --- Fallback: old tick-based clock (in case RTC not ready) ---
     uint32_t now_ms = lv_tick_get();
     uint32_t elapsed_s = (now_ms - bar->clock_start_ms) / 1000;
     uint32_t t = bar->clock_start_sec + elapsed_s;
@@ -21,6 +36,7 @@ static void status_bar_clock_update(ui_status_bar_t *bar)
     snprintf(buf, sizeof(buf), "%02u:%02u:%02u", (unsigned)hh, (unsigned)mm, (unsigned)ss);
     lv_label_set_text(bar->time_label, buf);
 }
+
 
 static void status_bar_clock_timer_cb(lv_timer_t *t)
 {
@@ -75,7 +91,7 @@ void ui_status_bar_create(ui_status_bar_t *bar, lv_obj_t *parent)
     lv_obj_set_grid_cell(bar->batt_label, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 
     bar->clock_start_ms = lv_tick_get();
-    bar->clock_start_sec = 12 * 3600; /* Dummy start: 12:00:00 */
+    bar->clock_start_sec = 0; /* Dummy start: 12:00:00 */
     bar->clock_timer = lv_timer_create(status_bar_clock_timer_cb, 1000, bar);
     status_bar_clock_update(bar);
 }

@@ -14,6 +14,8 @@
 #include "sd_mmc_helper.h"
 #include "ble.h"
 #include "stroke_detection.h"
+#include "rtc_pcf85063.h"
+
 #include "esp_timer.h"
 
 #include "ui/ui.h" // our new UI module
@@ -363,6 +365,8 @@ void app_main(void)
 {
     init_display_and_lvgl();
     init_touch_and_lvgl_input();
+    init_imu();
+    PCF85063_init(&s_imu_bus);
 
     /* Create UI in separate module */
     ui_init(s_disp);
@@ -380,7 +384,6 @@ void app_main(void)
     ble_set_device_name("ESP32S3-BLE"); // optional custom name
     ble_start_advertising();
 
-    /* Optional SD card */
     esp_err_t sd_err = sd_mmc_helper_mount(&s_sd, "/sdcard");
     if (sd_err != ESP_OK) {
         ESP_LOGW(TAG, "SD mount failed: %s (continuing)", esp_err_to_name(sd_err));
@@ -389,7 +392,6 @@ void app_main(void)
     ui_register_dark_mode_cb(on_dark_mode_setting_changed);
     ui_register_auto_rotate_cb(on_auto_rotate_setting_changed);
 
-    init_imu();
     xTaskCreatePinnedToCore(stroke_task, "stroke",
                             6144, NULL, 3, NULL, 0);
 

@@ -3,6 +3,7 @@
 #include "ui.h"       // for ui_notify_* functions
 #include "ui_status_bar.h"
 #include "ui_theme.h"
+#include "rtc_pcf85063.h"
 
 #include <stdbool.h>
 #include <stdint.h>

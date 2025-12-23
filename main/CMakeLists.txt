@@ -18,4 +18,5 @@ idf_component_register(
         stroke_detection
         sd_mmc_helper
         ble
+        rtc_pcf85063
 )
