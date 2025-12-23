@@ -2,11 +2,70 @@
 #include "ui_status_bar.h"
 #include "ui_theme.h"
 #include "rtc_pcf85063.h"
+#include "battery_drv.h"
 
+#include "esp_log.h"
 #include "esp_err.h"
 
 #include <stdio.h>
 #include <string.h>
+
+static const char *TAG = "ui_status_bar";
+
+static battery_drv_handle_t s_bat = NULL;
+static bool s_bat_inited = false;
+
+// One-time init for the whole app (since ADC channel is global/shared)
+static void status_bar_battery_init_once(void)
+{
+    if (s_bat_inited) return;
+    s_bat_inited = true;
+
+    battery_drv_config_t cfg = {
+        .unit = ADC_UNIT_1,
+        .channel = ADC_CHANNEL_7,          // GPIO8 on ESP32-S3
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+
+        // From your Waveshare example idea (tune later if needed)
+        .divider_ratio = 3.0f,
+        .measurement_offset = 0.9945f,
+
+        // Basic % mapping (tune later)
+        .v_empty = 3.30f,
+        .v_full  = 4.20f,
+
+        .samples = 8
+    };
+
+    esp_err_t err = battery_drv_init(&cfg, &s_bat);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "battery_drv_init failed: %s", esp_err_to_name(err));
+        s_bat = NULL;
+    }
+}
+
+static void status_bar_batt_timer_cb(lv_timer_t *t)
+{
+    ui_status_bar_t *bar = (ui_status_bar_t *)lv_timer_get_user_data(t);
+    if (!bar || !bar->batt_label) return;
+
+    if (!s_bat) {
+        // driver not available
+        lv_label_set_text(bar->batt_label, "BAT: --%");
+        return;
+    }
+
+    int pct = -1;
+    if (battery_drv_read_percent(s_bat, &pct) == ESP_OK) {
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        lv_label_set_text_fmt(bar->batt_label, "BAT: %d%%", pct);
+    } else {
+        lv_label_set_text(bar->batt_label, "BAT: --%");
+    }
+}
+
 
 static void status_bar_clock_update(ui_status_bar_t *bar)
 {
@@ -36,7 +95,6 @@ static void status_bar_clock_update(ui_status_bar_t *bar)
     snprintf(buf, sizeof(buf), "%02u:%02u:%02u", (unsigned)hh, (unsigned)mm, (unsigned)ss);
     lv_label_set_text(bar->time_label, buf);
 }
-
 
 static void status_bar_clock_timer_cb(lv_timer_t *t)
 {
@@ -90,6 +148,11 @@ void ui_status_bar_create(ui_status_bar_t *bar, lv_obj_t *parent)
     lv_obj_set_style_text_align(bar->batt_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_grid_cell(bar->batt_label, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 
+     // Battery auto-update
+    status_bar_battery_init_once();
+    bar->batt_timer = lv_timer_create(status_bar_batt_timer_cb, 2000, bar); // every 2s
+    status_bar_batt_timer_cb(bar->batt_timer); // immediate first refresh
+
     bar->clock_start_ms = lv_tick_get();
     bar->clock_start_sec = 0; /* Dummy start: 12:00:00 */
     bar->clock_timer = lv_timer_create(status_bar_clock_timer_cb, 1000, bar);
@@ -138,10 +201,12 @@ void ui_status_bar_set_gps_status(ui_status_bar_t *bar, bool connected, uint8_t 
     lv_label_set_text(bar->gps_label, buf);
 }
 
-void ui_status_bar_set_battery_text(ui_status_bar_t *bar, const char *text)
+void ui_status_bar_set_battery(ui_status_bar_t *bar, int percent)
 {
     if (!bar || !bar->batt_label) return;
-    lv_label_set_text(bar->batt_label, text ? text : "");
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    lv_label_set_text_fmt(bar->batt_label, "BAT: %d%%", percent);
 }
 
 void ui_status_bar_set_time_base(ui_status_bar_t *bar, uint32_t start_sec)

@@ -16,5 +16,11 @@
     "--query-driver=C:\\Espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32-elf-gcc.exe",
     "--compile-commands-dir=${workspaceFolder}\\build"
   ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+
+  "idf.openOcdLaunchArgs": [
+    "-d2",
+    "-f", "board/esp32s3-builtin.cfg",
+    "-c", "adapter speed 10000"
+  ]
 }

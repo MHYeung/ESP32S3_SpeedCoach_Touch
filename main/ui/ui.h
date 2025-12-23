@@ -20,6 +20,10 @@ typedef enum {
     UI_PAGE_COUNT,
 } ui_page_t;
 
+typedef void (*ui_shutdown_confirm_cb_t)(void);
+void ui_register_shutdown_confirm_cb(ui_shutdown_confirm_cb_t cb);
+void ui_show_shutdown_prompt(void);
+
 void ui_set_orientation(ui_orientation_t o);
 void ui_go_to_page(ui_page_t page, bool animated);
 

@@ -3,6 +3,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_sleep.h"
 
 #include "lcd_st7789.h"
 #include "touch_cst328.h"
@@ -15,6 +16,8 @@
 #include "ble.h"
 #include "stroke_detection.h"
 #include "rtc_pcf85063.h"
+#include "battery_drv.h"
+#include "pwr_key.h"
 
 #include "esp_timer.h"
 
@@ -22,6 +25,7 @@
 #include "ui/ui_data_page.h"
 #include "math.h"
 #include <stdio.h>
+#include "ui_status_bar.h"
 
 static const char *TAG = "app";
 static sd_mmc_helper_t s_sd; // <--- this is the missing variable
@@ -95,6 +99,77 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         data->point.x = s_last_touch_x;
         data->point.y = s_last_touch_y;
     }
+}
+
+/* ===========================================================
+ *  PWR_KEY Setup
+ * ===========================================================
+ */
+static bool s_activity_recording = false;
+
+static void on_shutdown_confirmed(void)
+{
+    // Optional: save state, flush logs, stop peripherals, etc.
+    // Then cut the latch power:
+    pwr_key_set_hold(false);
+}
+
+static void app_enter_sleep(void)
+{
+    // TODO: turn off backlight here if you have a function/pin for it
+    // backlight_set(false);
+
+    // Wake on key press (active-low)
+    // GPIO6 must be RTC-capable for ext0; on ESP32-S3 this is usually OK.
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0);
+
+    // Light sleep keeps RAM and resumes quickly
+    esp_light_sleep_start();
+
+    // Woke up
+    // backlight_set(true);
+}
+
+static void pwr_evt_cb(pwr_key_event_t evt, void *user)
+{
+    (void)user;
+
+    switch (evt) {
+        case PWR_KEY_EVT_ACTIVITY_TOGGLE:
+            s_activity_recording = !s_activity_recording;
+            ESP_LOGI(TAG, "Activity recording: %s", s_activity_recording ? "START" : "STOP");
+            break;
+
+        case PWR_KEY_EVT_SHUTDOWN_PROMPT:
+            // Keep your previous behavior (optional)
+            ui_show_shutdown_prompt();
+            ESP_LOGI(TAG, "Long press 5s: show shutdown prompt");
+            break;
+
+        case PWR_KEY_EVT_SHORT_PRESS:
+        default:
+            // optional: ignore short press for now
+            break;
+    }
+}
+
+static void app_pwr_key_setup(void)
+{
+    // Start the power key task
+    pwr_key_config_t cfg = {
+        .key_gpio = GPIO_NUM_6,
+        .hold_gpio = GPIO_NUM_7,
+        .key_active_low = true,
+        .debounce_ms = 30,
+        .poll_ms = 20,
+        .toggle_hold_ms = 1600,
+        .prompt_hold_ms = 5000,
+    };
+    ESP_ERROR_CHECK(pwr_key_init(&cfg, pwr_evt_cb, NULL));
+
+    // Keep power latched on
+    pwr_key_set_hold(true);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -185,9 +260,11 @@ static void auto_rotate_on_stroke_update(stroke_event_t ev, float t_s)
 {
     static float last_event_t = -1.0f;
 
-    if (ev != STROKE_EVENT_NONE) {
+    if (ev != STROKE_EVENT_NONE)
+    {
         last_event_t = t_s;
-        if (!s_auto_rotate_locked && s_auto_rotate_enabled) {
+        if (!s_auto_rotate_locked && s_auto_rotate_enabled)
+        {
             s_auto_rotate_locked = true;
             s_auto_rotate_enabled = false;
             ESP_LOGI("APP", "Auto-rotate locked (stroke started)");
@@ -196,7 +273,8 @@ static void auto_rotate_on_stroke_update(stroke_event_t ev, float t_s)
 
     // Unlock after a quiet period (no stroke events)
     const float UNLOCK_IDLE_S = 5.0f;
-    if (s_auto_rotate_locked && last_event_t > 0.0f && (t_s - last_event_t) > UNLOCK_IDLE_S) {
+    if (s_auto_rotate_locked && last_event_t > 0.0f && (t_s - last_event_t) > UNLOCK_IDLE_S)
+    {
         s_auto_rotate_locked = false;
         s_auto_rotate_enabled = true;
         ESP_LOGI("APP", "Auto-rotate unlocked (idle %.1fs)", (double)(t_s - last_event_t));
@@ -213,8 +291,8 @@ static void stroke_task(void *arg)
         .gravity_tau_s = 0.8f,
         .axis_window_s = 4.0f,
         .axis_hold_s = 0.5f,
-        .accel_use_fixed_axis = true,  // accel is strongest along screen normal
-        .accel_fixed_axis = 2,         // Z-axis
+        .accel_use_fixed_axis = true, // accel is strongest along screen normal
+        .accel_fixed_axis = 2,        // Z-axis
         .hpf_hz = 0.2f,
         .lpf_hz = 1.2f,
         .min_stroke_period_s = 0.8f,
@@ -231,34 +309,43 @@ static void stroke_task(void *arg)
     ui_orientation_t last_orient = s_current_orient;
     int stable_count = 0;
 
-    const TickType_t sample_delay = pdMS_TO_TICKS(5);   // ~200 Hz
-    const TickType_t ui_period = pdMS_TO_TICKS(100);    // 10 Hz UI updates
+    const TickType_t sample_delay = pdMS_TO_TICKS(5); // ~200 Hz
+    const TickType_t ui_period = pdMS_TO_TICKS(100);  // 10 Hz UI updates
 
-    while (1) {
+    while (1)
+    {
         float ax, ay, az, gx, gy, gz;
         esp_err_t err = qmi8658_read_accel_gyro(&s_imu, &ax, &ay, &az, &gx, &gy, &gz);
-        if (err == ESP_OK) {
+        if (err == ESP_OK)
+        {
             float t_s = (float)(esp_timer_get_time() - t0_us) * 1e-6f;
 
             stroke_metrics_t m;
             stroke_event_t ev = stroke_detection_update(&s_stroke, t_s, ax, ay, az, gx, gy, gz, &m);
             auto_rotate_on_stroke_update(ev, t_s);
-            if (ev != STROKE_EVENT_NONE) {
+            if (ev != STROKE_EVENT_NONE)
+            {
                 ESP_LOGI("STROKE", "ev=%d count=%lu spm=%.1f period=%.2fs",
                          (int)ev, (unsigned long)m.stroke_count, (double)m.spm, (double)m.stroke_period_s);
             }
 
-            if (s_auto_rotate_enabled) {
+            if (s_auto_rotate_enabled)
+            {
                 ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
 
-                if (candidate == last_orient) {
-                    if (stable_count < 20) stable_count++;
-                } else {
+                if (candidate == last_orient)
+                {
+                    if (stable_count < 20)
+                        stable_count++;
+                }
+                else
+                {
                     last_orient = candidate;
                     stable_count = 0;
                 }
 
-                if (stable_count >= 8 && candidate != s_current_orient) {
+                if (stable_count >= 8 && candidate != s_current_orient)
+                {
                     s_current_orient = candidate;
                     ui_set_orientation(candidate);
                 }
@@ -266,18 +353,22 @@ static void stroke_task(void *arg)
 
             static float s_last_valid_spm = NAN;
             static float s_last_spm_t_s = -1.0f;
-            if (isfinite(m.spm) && m.spm >= 10.0f && m.spm <= 80.0f) {
+            if (isfinite(m.spm) && m.spm >= 10.0f && m.spm <= 80.0f)
+            {
                 s_last_valid_spm = m.spm;
                 s_last_spm_t_s = t_s;
             }
 
             TickType_t now = xTaskGetTickCount();
-            if ((now - last_ui_tick) >= ui_period) {
+            if ((now - last_ui_tick) >= ui_period)
+            {
                 last_ui_tick = now;
 
                 float spm_out = s_last_valid_spm;
-                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_out = NAN;
-                if (isfinite(spm_out)) {
+                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f)
+                    spm_out = NAN;
+                if (isfinite(spm_out))
+                {
                     spm_out = roundf(spm_out); // keep SPM stable and integer
                 }
 
@@ -297,7 +388,6 @@ static void stroke_task(void *arg)
         vTaskDelay(sample_delay);
     }
 }
-
 
 /* ===========================================================
  *  INIT HELPERS
@@ -367,6 +457,7 @@ void app_main(void)
     init_touch_and_lvgl_input();
     init_imu();
     PCF85063_init(&s_imu_bus);
+    app_pwr_key_setup();
 
     /* Create UI in separate module */
     ui_init(s_disp);
@@ -385,12 +476,14 @@ void app_main(void)
     ble_start_advertising();
 
     esp_err_t sd_err = sd_mmc_helper_mount(&s_sd, "/sdcard");
-    if (sd_err != ESP_OK) {
+    if (sd_err != ESP_OK)
+    {
         ESP_LOGW(TAG, "SD mount failed: %s (continuing)", esp_err_to_name(sd_err));
     }
 
     ui_register_dark_mode_cb(on_dark_mode_setting_changed);
     ui_register_auto_rotate_cb(on_auto_rotate_setting_changed);
+    ui_register_shutdown_confirm_cb(on_shutdown_confirmed);
 
     xTaskCreatePinnedToCore(stroke_task, "stroke",
                             6144, NULL, 3, NULL, 0);

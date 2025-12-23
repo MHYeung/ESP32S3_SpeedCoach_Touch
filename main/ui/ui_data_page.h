@@ -30,3 +30,4 @@ void data_page_set_orientation(ui_orientation_t o);
 void data_page_set_metrics(const data_metric_t metrics[], size_t count); // per slot
 void data_page_set_values(const data_values_t *v);
 void data_page_apply_theme(void);
+

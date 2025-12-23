@@ -21,6 +21,9 @@ static lv_point_t s_top_swipe_sum = {0};
 static bool s_settings_swipe_armed = false;
 static lv_point_t s_settings_swipe_sum = {0};
 
+static ui_shutdown_confirm_cb_t s_shutdown_confirm_cb = NULL;
+static lv_obj_t *s_shutdown_overlay = NULL;
+
 static void ui_pages_relayout(void);
 
 /* Callbacks registered from main.c */
@@ -31,7 +34,10 @@ static bool s_dark_mode = true;
 
 /* ---------- Registration from main.c ---------- */
 
-
+void ui_register_shutdown_confirm_cb(ui_shutdown_confirm_cb_t cb)
+{
+    s_shutdown_confirm_cb = cb;
+}
 
 void ui_register_dark_mode_cb(ui_dark_mode_cb_t cb)
 {
@@ -357,6 +363,81 @@ static void create_pages_ui(void)
 
     ui_pages_relayout();
 }
+
+static void shutdown_btn_event_cb(lv_event_t *e)
+{
+    const char *tag = (const char *)lv_event_get_user_data(e);
+    if (!tag) return;
+
+    if (s_shutdown_overlay) {
+        lv_obj_del(s_shutdown_overlay);
+        s_shutdown_overlay = NULL;
+    }
+
+    if (strcmp(tag, "shutdown") == 0) {
+        if (s_shutdown_confirm_cb) s_shutdown_confirm_cb();
+    }
+}
+
+static void shutdown_prompt_create(void *unused)
+{
+    (void)unused;
+
+    // If already open, don’t create twice
+    if (s_shutdown_overlay) return;
+
+    lv_obj_t *top = lv_layer_top();
+
+    // Full-screen dim overlay
+    s_shutdown_overlay = lv_obj_create(top);
+    lv_obj_set_size(s_shutdown_overlay, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_opa(s_shutdown_overlay, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(s_shutdown_overlay, 0, 0);
+    lv_obj_clear_flag(s_shutdown_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Center panel
+    lv_obj_t *panel = lv_obj_create(s_shutdown_overlay);
+    lv_obj_set_size(panel, 280, 180);
+    lv_obj_center(panel);
+    lv_obj_set_style_pad_all(panel, 14, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Power Off?");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *msg = lv_label_create(panel);
+    lv_label_set_text(msg, "Shut the device down now?");
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(msg, 220);
+    lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 30);
+
+    // Buttons row
+    lv_obj_t *btn_cancel = lv_btn_create(panel);
+    lv_obj_set_size(btn_cancel, 110, 45);
+    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_add_event_cb(btn_cancel, shutdown_btn_event_cb, LV_EVENT_CLICKED, (void*)"cancel");
+    lv_obj_t *lc = lv_label_create(btn_cancel);
+    lv_label_set_text(lc, "Cancel");
+    lv_obj_center(lc);
+
+    lv_obj_t *btn_shutdown = lv_btn_create(panel);
+    lv_obj_set_size(btn_shutdown, 110, 45);
+    lv_obj_align(btn_shutdown, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_add_event_cb(btn_shutdown, shutdown_btn_event_cb, LV_EVENT_CLICKED, (void*)"shutdown");
+    lv_obj_t *ls = lv_label_create(btn_shutdown);
+    lv_label_set_text(ls, "Shutdown");
+    lv_obj_center(ls);
+}
+
+void ui_show_shutdown_prompt(void)
+{
+    // Thread-safe: schedule on LVGL context
+    lv_async_call(shutdown_prompt_create, NULL);
+}
+
+
 /* ---------- Public init ---------- */
 
 void ui_init(lv_disp_t *disp)

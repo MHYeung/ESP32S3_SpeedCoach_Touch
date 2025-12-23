@@ -19,4 +19,6 @@ idf_component_register(
         sd_mmc_helper
         ble
         rtc_pcf85063
+        pwr_key
+        battery_drv
 )
