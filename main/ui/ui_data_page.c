@@ -225,11 +225,17 @@ static void apply_metric_to_slot(int idx)
         }
         break;
     case DATA_METRIC_SPM:
-        if (!isfinite(s_values.spm) || s_values.spm < 0.0f) {
+        if (!isfinite(s_values.spm)) {
             snprintf(value_buf, sizeof(value_buf), "--");
         } else {
-            float spm_int = roundf(s_values.spm);
-            snprintf(value_buf, sizeof(value_buf), "%.0f", (double)spm_int);
+            // If it's .0 show no decimals; if it's .5 show one decimal
+            float x = s_values.spm;
+            float frac = fabsf(x - floorf(x));
+            if (fabsf(frac - 0.5f) < 0.01f) {
+                snprintf(value_buf, sizeof(value_buf), "%.1f", (double)x);
+            } else {
+                snprintf(value_buf, sizeof(value_buf), "%.0f", (double)x);
+            }
         }
         break;
     case DATA_METRIC_POWER:
@@ -240,7 +246,12 @@ static void apply_metric_to_slot(int idx)
         }
         break;
     case DATA_METRIC_STROKE_COUNT:
-        snprintf(value_buf, sizeof(value_buf), "%lu", (unsigned long)s_values.stroke_count);
+        if (s_values.stroke_count == UINT32_MAX) {
+        snprintf(value_buf, sizeof(value_buf), "--");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%lu",
+                    (unsigned long)s_values.stroke_count);
+        }
         break;
     default:
         snprintf(value_buf, sizeof(value_buf), "--");

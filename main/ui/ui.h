@@ -20,9 +20,15 @@ typedef enum {
     UI_PAGE_COUNT,
 } ui_page_t;
 
+/* Long Press to shut down */
 typedef void (*ui_shutdown_confirm_cb_t)(void);
 void ui_register_shutdown_confirm_cb(ui_shutdown_confirm_cb_t cb);
 void ui_show_shutdown_prompt(void);
+
+/* Press to confirm stop recording the activity */
+typedef void (*ui_stop_save_confirm_cb_t)(void);
+void ui_register_stop_save_confirm_cb(ui_stop_save_confirm_cb_t cb);
+void ui_show_stop_save_prompt(void);
 
 void ui_set_orientation(ui_orientation_t o);
 void ui_go_to_page(ui_page_t page, bool animated);
@@ -40,3 +46,5 @@ void ui_register_auto_rotate_cb(ui_auto_rotate_cb_t cb);
 /* NEW: internal helpers that per-page code can call */
 void ui_notify_dark_mode_changed(bool enabled);
 void ui_notify_auto_rotate_changed(bool enabled);
+
+

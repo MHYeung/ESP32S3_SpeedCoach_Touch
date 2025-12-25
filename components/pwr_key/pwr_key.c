@@ -129,6 +129,6 @@ esp_err_t pwr_key_init(const pwr_key_config_t *cfg, pwr_key_cb_t cb, void *user)
     // You can set this true immediately if you want the device to stay on.
     // pwr_key_set_hold(true);
 
-    xTaskCreate(pwr_key_task, "pwr_key", 3072, NULL, 10, NULL);
+    xTaskCreate(pwr_key_task, "pwr_key", 4096, NULL, 10, NULL);
     return ESP_OK;
 }

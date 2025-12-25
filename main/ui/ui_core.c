@@ -21,8 +21,13 @@ static lv_point_t s_top_swipe_sum = {0};
 static bool s_settings_swipe_armed = false;
 static lv_point_t s_settings_swipe_sum = {0};
 
+/* Shutdown Dialog */
 static ui_shutdown_confirm_cb_t s_shutdown_confirm_cb = NULL;
 static lv_obj_t *s_shutdown_overlay = NULL;
+
+/* Stop and Save Dialog*/
+static ui_stop_save_confirm_cb_t s_stop_save_confirm_cb = NULL;
+static lv_obj_t *s_stop_save_overlay = NULL;
 
 static void ui_pages_relayout(void);
 
@@ -33,6 +38,10 @@ static ui_auto_rotate_cb_t s_auto_rotate_cb = NULL;
 static bool s_dark_mode = true;
 
 /* ---------- Registration from main.c ---------- */
+void ui_register_stop_save_confirm_cb(ui_stop_save_confirm_cb_t cb)
+{
+    s_stop_save_confirm_cb = cb;
+}
 
 void ui_register_shutdown_confirm_cb(ui_shutdown_confirm_cb_t cb)
 {
@@ -364,6 +373,78 @@ static void create_pages_ui(void)
     ui_pages_relayout();
 }
 
+
+/* Stop Save Prompt*/
+static void stop_save_btn_event_cb(lv_event_t *e)
+{
+    const char *tag = (const char *)lv_event_get_user_data(e);
+    if (!tag) return;
+
+    if (s_stop_save_overlay) {
+        lv_obj_del(s_stop_save_overlay);
+        s_stop_save_overlay = NULL;
+    }
+
+    if (strcmp(tag, "stop_save") == 0) {
+        if (s_stop_save_confirm_cb) s_stop_save_confirm_cb();
+    } else {
+        // cancel -> do nothing (continue recording)
+    }
+}
+
+static void stop_save_prompt_create(void *unused)
+{
+    (void)unused;
+    if (s_stop_save_overlay) return;
+
+    lv_obj_t *top = lv_layer_top();
+
+    s_stop_save_overlay = lv_obj_create(top);
+    lv_obj_set_size(s_stop_save_overlay, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_opa(s_stop_save_overlay, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(s_stop_save_overlay, 0, 0);
+    lv_obj_clear_flag(s_stop_save_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(s_stop_save_overlay);
+    lv_obj_set_size(panel, 280, 180);
+    lv_obj_center(panel);
+    lv_obj_set_style_pad_all(panel, 14, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Stop Activity?");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *msg = lv_label_create(panel);
+    lv_label_set_text(msg, "Stop and save this session?");
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(msg, 240);
+    lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 34);
+
+    lv_obj_t *btn_cancel = lv_btn_create(panel);
+    lv_obj_set_size(btn_cancel, 110, 45);
+    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_add_event_cb(btn_cancel, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"cancel");
+    lv_obj_t *lc = lv_label_create(btn_cancel);
+    lv_label_set_text(lc, "Cancel");
+    lv_obj_center(lc);
+
+    lv_obj_t *btn_stop = lv_btn_create(panel);
+    lv_obj_set_size(btn_stop, 110, 45);
+    lv_obj_align(btn_stop, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_add_event_cb(btn_stop, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"stop_save");
+    lv_obj_t *ls = lv_label_create(btn_stop);
+    lv_label_set_text(ls, "Save");
+    lv_obj_center(ls);
+}
+
+void ui_show_stop_save_prompt(void)
+{
+    lv_async_call(stop_save_prompt_create, NULL);
+}
+
+/* Shut Down Prompt */
 static void shutdown_btn_event_cb(lv_event_t *e)
 {
     const char *tag = (const char *)lv_event_get_user_data(e);

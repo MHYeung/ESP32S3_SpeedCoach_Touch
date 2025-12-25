@@ -18,6 +18,7 @@
 #include "rtc_pcf85063.h"
 #include "battery_drv.h"
 #include "pwr_key.h"
+#include "activity.h"
 
 #include "esp_timer.h"
 
@@ -28,7 +29,6 @@
 #include "ui_status_bar.h"
 
 static const char *TAG = "app";
-static sd_mmc_helper_t s_sd; // <--- this is the missing variable
 
 /* ---------- Kconfig-based touch pins ---------- */
 
@@ -44,6 +44,28 @@ static sd_mmc_helper_t s_sd; // <--- this is the missing variable
 #define IMU_SDA_GPIO CONFIG_IMU_QMI8658_SDA
 #define IMU_SCL_GPIO CONFIG_IMU_QMI8658_SCL
 #define IMU_I2C_CLK CONFIG_IMU_QMI8658_I2C_CLK
+
+/* Toggle Activity globals*/
+typedef enum {
+    ACT_CMD_START = 0,
+    ACT_CMD_STOP_SAVE,
+} act_cmd_t;
+
+static sd_mmc_helper_t s_sd; 
+static QueueHandle_t s_act_q = NULL;
+static TaskHandle_t s_act_worker_task = NULL;
+static bool s_activity_recording = false;
+// Activity/session model + timer
+static activity_t s_activity;
+static uint32_t s_activity_next_id = 1;
+
+static float s_session_time_s = 0.0f;          // session timer shown on data page
+static int64_t s_session_last_us = 0;          // for dt computation
+
+static uint32_t s_last_stroke_count_seen = 0;  // latest raw stroke counter from detector (boot-based)
+static uint32_t s_last_session_stroke_count = 0; // baseline for session delta
+
+static SemaphoreHandle_t s_activity_mutex = NULL;
 
 /* LVGL display + input */
 static lv_disp_t *s_disp = NULL;
@@ -61,6 +83,7 @@ static bool s_auto_rotate_locked = false;
 /* Last touch point */
 static int16_t s_last_touch_x = 0;
 static int16_t s_last_touch_y = 0;
+
 
 /* ===========================================================
  *  TOUCH → LVGL INPUT CALLBACK
@@ -105,7 +128,7 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
  *  PWR_KEY Setup
  * ===========================================================
  */
-static bool s_activity_recording = false;
+
 
 static void on_shutdown_confirmed(void)
 {
@@ -137,14 +160,17 @@ static void pwr_evt_cb(pwr_key_event_t evt, void *user)
 
     switch (evt) {
         case PWR_KEY_EVT_ACTIVITY_TOGGLE:
-            s_activity_recording = !s_activity_recording;
-            ESP_LOGI(TAG, "Activity recording: %s", s_activity_recording ? "START" : "STOP");
-            // 1) Move to data page (animated)
-            ui_go_to_page(UI_PAGE_DATA, true);
-
-            // 2) Show overlay icon (green start / red stop)
-            data_page_show_activity_toast(s_activity_recording);
+        {
+            if (!s_activity_recording) {
+                // Start immediately
+                act_cmd_t cmd = ACT_CMD_START;
+                xQueueSend(s_act_q, &cmd, 0);
+            } else {
+                // Recording -> ask user
+                ui_show_stop_save_prompt();
+            }
             break;
+        }
 
         case PWR_KEY_EVT_SHUTDOWN_PROMPT:
             // Keep your previous behavior (optional)
@@ -176,6 +202,62 @@ static void app_pwr_key_setup(void)
 
     // Keep power latched on
     pwr_key_set_hold(true);
+}
+
+static void activity_worker_task(void *arg)
+{
+    (void)arg;
+
+    act_cmd_t cmd;
+
+    for (;;) {
+        if (xQueueReceive(s_act_q, &cmd, portMAX_DELAY) != pdTRUE) continue;
+
+        ui_go_to_page(UI_PAGE_DATA, true);
+
+        if (s_activity_mutex) xSemaphoreTake(s_activity_mutex, portMAX_DELAY);
+
+        if (cmd == ACT_CMD_START) {
+            s_activity_recording = true;
+            s_session_time_s = 0.0f;
+
+            uint32_t id = s_activity_next_id++;
+            activity_init(&s_activity, id);
+            activity_start(&s_activity, time(NULL));
+
+            // baseline will be set by stroke_task on first cycle
+            s_last_session_stroke_count = 0;
+
+            if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
+
+            data_page_show_activity_toast(true);
+            ESP_LOGI("ACT", "START id=%lu", (unsigned long)id);
+        }
+
+        if (cmd == ACT_CMD_STOP_SAVE) {
+             s_activity_recording = false;
+            activity_stop(&s_activity, time(NULL));
+
+            activity_t snapshot = s_activity; // copy for saving
+            if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
+
+            data_page_show_activity_toast(false);
+            ESP_LOGI("ACT", "STOP id=%lu", (unsigned long)snapshot.id);
+
+            if (s_sd.mounted) {
+                esp_err_t e = activity_save_to_sd(&s_sd, &snapshot, true);
+                ESP_LOGI("ACT", "Saved: %s", esp_err_to_name(e));
+            } else {
+                ESP_LOGW("ACT", "SD not mounted, not saved");
+            }
+        }
+    }
+}
+
+static void on_stop_save_confirmed(void)
+{
+    act_cmd_t cmd = ACT_CMD_STOP_SAVE;
+    xQueueSend(s_act_q, &cmd, 0);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -262,31 +344,6 @@ static void init_imu(void)
     ESP_ERROR_CHECK(qmi8658_init(&s_imu, &s_imu_bus, QMI8658_I2C_ADDR));
 }
 
-static void auto_rotate_on_stroke_update(stroke_event_t ev, float t_s)
-{
-    static float last_event_t = -1.0f;
-
-    if (ev != STROKE_EVENT_NONE)
-    {
-        last_event_t = t_s;
-        if (!s_auto_rotate_locked && s_auto_rotate_enabled)
-        {
-            s_auto_rotate_locked = true;
-            s_auto_rotate_enabled = false;
-            ESP_LOGI("APP", "Auto-rotate locked (stroke started)");
-        }
-    }
-
-    // Unlock after a quiet period (no stroke events)
-    const float UNLOCK_IDLE_S = 5.0f;
-    if (s_auto_rotate_locked && last_event_t > 0.0f && (t_s - last_event_t) > UNLOCK_IDLE_S)
-    {
-        s_auto_rotate_locked = false;
-        s_auto_rotate_enabled = true;
-        ESP_LOGI("APP", "Auto-rotate unlocked (idle %.1fs)", (double)(t_s - last_event_t));
-    }
-}
-
 static void stroke_task(void *arg)
 {
     (void)arg;
@@ -297,8 +354,8 @@ static void stroke_task(void *arg)
         .gravity_tau_s = 0.8f,
         .axis_window_s = 4.0f,
         .axis_hold_s = 0.5f,
-        .accel_use_fixed_axis = true, // accel is strongest along screen normal
-        .accel_fixed_axis = 2,        // Z-axis
+        .accel_use_fixed_axis = true,
+        .accel_fixed_axis = 2,
         .hpf_hz = 0.2f,
         .lpf_hz = 1.2f,
         .min_stroke_period_s = 0.8f,
@@ -310,82 +367,155 @@ static void stroke_task(void *arg)
     stroke_detection_init(&s_stroke, &cfg);
 
     const int64_t t0_us = esp_timer_get_time();
+    int64_t prev_us = esp_timer_get_time();
     TickType_t last_ui_tick = xTaskGetTickCount();
 
     ui_orientation_t last_orient = s_current_orient;
     int stable_count = 0;
 
     const TickType_t sample_delay = pdMS_TO_TICKS(5); // ~200 Hz
-    const TickType_t ui_period = pdMS_TO_TICKS(100);  // 10 Hz UI updates
+    const TickType_t ui_period    = pdMS_TO_TICKS(100);  // 10 Hz UI updates
 
-    while (1)
-    {
+    static float s_last_valid_spm = NAN;
+    static float s_last_spm_t_s = -1.0f;
+
+    // Keep a “latest” detector count so START can baseline
+    static uint32_t s_latest_detector_strokes = 0;
+
+    while (1) {
         float ax, ay, az, gx, gy, gz;
         esp_err_t err = qmi8658_read_accel_gyro(&s_imu, &ax, &ay, &az, &gx, &gy, &gz);
-        if (err == ESP_OK)
-        {
-            float t_s = (float)(esp_timer_get_time() - t0_us) * 1e-6f;
+        if (err == ESP_OK) {
 
-            stroke_metrics_t m;
+            // Use one timestamp per loop for consistency
+            int64_t now_us = esp_timer_get_time();
+            float t_s  = (float)(now_us - t0_us) * 1e-6f;         // boot time (for algorithm)
+            float dt_s = (float)(now_us - prev_us) * 1e-6f;       // delta time
+            prev_us = now_us;
+            if (dt_s < 0.0f) dt_s = 0.0f;
+            if (dt_s > 0.1f) dt_s = 0.1f; // clamp in case of pauses
+
+            // Stroke detection
+            stroke_metrics_t m = {0};
             stroke_event_t ev = stroke_detection_update(&s_stroke, t_s, ax, ay, az, gx, gy, gz, &m);
-            auto_rotate_on_stroke_update(ev, t_s);
-            if (ev != STROKE_EVENT_NONE)
-            {
+
+            // Track latest detector stroke count
+            s_latest_detector_strokes = m.stroke_count;
+
+            // Optional debug
+            if (ev != STROKE_EVENT_NONE) {
                 ESP_LOGI("STROKE", "ev=%d count=%lu spm=%.1f period=%.2fs",
                          (int)ev, (unsigned long)m.stroke_count, (double)m.spm, (double)m.stroke_period_s);
             }
 
-            if (s_auto_rotate_enabled)
-            {
+            // Orientation auto-rotate (OK to keep; consider running this at 10Hz later)
+            if (s_auto_rotate_enabled) {
                 ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
 
-                if (candidate == last_orient)
-                {
-                    if (stable_count < 20)
-                        stable_count++;
-                }
-                else
-                {
+                if (candidate == last_orient) {
+                    if (stable_count < 20) stable_count++;
+                } else {
                     last_orient = candidate;
                     stable_count = 0;
                 }
 
-                if (stable_count >= 8 && candidate != s_current_orient)
-                {
+                if (stable_count >= 8 && candidate != s_current_orient) {
                     s_current_orient = candidate;
                     ui_set_orientation(candidate);
                 }
             }
 
-            static float s_last_valid_spm = NAN;
-            static float s_last_spm_t_s = -1.0f;
-            if (isfinite(m.spm) && m.spm >= 10.0f && m.spm <= 80.0f)
-            {
+            // Keep last valid SPM (bounded + integer output)
+            if (isfinite(m.spm) && m.spm >= 10.0f && m.spm <= 80.0f) {
                 s_last_valid_spm = m.spm;
                 s_last_spm_t_s = t_s;
             }
 
+            // ---- Activity logic (session timer + activity model) ----
+            float ui_time_s = 0.0f;
+            uint32_t ui_strokes = 0;
+
+            // If you’ll later add GPS speed/distance: fill these in here
+            float speed_mps = 0.0f;
+            float power_w   = 0.0f;
+            float dist_delta_m = 0.0f;
+
+            if (s_activity_mutex) xSemaphoreTake(s_activity_mutex, portMAX_DELAY);
+
+            if (s_activity_recording) {
+                // Session time counts only when recording
+                s_session_time_s += dt_s;
+
+                // Baseline stroke count on first recording cycle
+                if (s_last_session_stroke_count == 0) {
+                    s_last_session_stroke_count = s_latest_detector_strokes;
+                }
+
+                uint32_t stroke_delta = 0;
+                if (s_latest_detector_strokes >= s_last_session_stroke_count) {
+                    stroke_delta = s_latest_detector_strokes - s_last_session_stroke_count;
+                }
+                s_last_session_stroke_count = s_latest_detector_strokes;
+
+                float spm_raw = (isfinite(s_last_valid_spm) ? s_last_valid_spm : NAN);
+                float spm_for_act = (isfinite(spm_raw) ? spm_raw : 0.0f);
+                //float spm_for_act = (isfinite(s_last_valid_spm) ? s_last_valid_spm : 0.0f);
+
+                // Update activity summary stats
+                activity_update(&s_activity,
+                                dt_s,
+                                speed_mps,
+                                spm_for_act,
+                                power_w,
+                                dist_delta_m,
+                                stroke_delta);
+            } else {
+                // Not recording: keep at 0 (or freeze last session if you prefer)
+                // Here we keep it at 0 as you requested.
+                s_session_time_s = 0.0f;
+                s_last_session_stroke_count = 0;
+            }
+
+            ui_time_s  = s_session_time_s;
+            ui_strokes = s_activity.stroke_count;
+
+            if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
+            // ---- End activity logic ----
+
+            // ---- UI update at 10Hz ----
             TickType_t now = xTaskGetTickCount();
             if ((now - last_ui_tick) >= ui_period)
             {
                 last_ui_tick = now;
 
-                float spm_out = s_last_valid_spm;
-                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f)
-                    spm_out = NAN;
-                if (isfinite(spm_out))
-                {
-                    spm_out = roundf(spm_out); // keep SPM stable and integer
+                float spm_raw = s_last_valid_spm;
+                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) {
+                    spm_raw = NAN;
                 }
 
+                // Display value: snap to 0.5 increments (choose ONE rounding behavior)
+                float spm_disp = spm_raw;
+                if (isfinite(spm_disp)) {
+                    // Nearest 0.5 step:
+                    //spm_disp = roundf(spm_disp * 2.0f) / 2.0f;
+
+                    // If you want CEIL to next 0.5 (what you currently have):
+                    spm_disp = ceilf(spm_disp * 2.0f) / 2.0f;
+
+                    // If you want FLOOR to lower 0.5:
+                    // spm_disp = floorf(spm_disp * 2.0f) / 2.0f;
+                }
+
+                bool recording = s_activity_recording;
+
                 data_values_t v = {
-                    .time_s = t_s,
+                    .time_s = recording ? s_session_time_s : NAN,                 // hide when not recording
                     .distance_m = NAN,
                     .pace_s_per_500m = NAN,
                     .speed_mps = NAN,
-                    .spm = spm_out,
+                    .spm = spm_disp,                                               // <-- keep visible ALWAYS
                     .power_w = NAN,
-                    .stroke_count = m.stroke_count,
+                    .stroke_count = recording ? s_activity.stroke_count : UINT32_MAX, // hide when not recording
                 };
                 data_page_set_values(&v);
             }
@@ -490,7 +620,17 @@ void app_main(void)
     ui_register_dark_mode_cb(on_dark_mode_setting_changed);
     ui_register_auto_rotate_cb(on_auto_rotate_setting_changed);
     ui_register_shutdown_confirm_cb(on_shutdown_confirmed);
+    ui_register_stop_save_confirm_cb(on_stop_save_confirmed);
 
+    s_activity_mutex = xSemaphoreCreateMutex();
+    activity_init(&s_activity, 0);
+    s_session_time_s = 0.0f;
+    s_session_last_us = esp_timer_get_time();
+
+    s_act_q = xQueueCreate(4, sizeof(act_cmd_t));
+    assert(s_act_q);
+
+    xTaskCreate(activity_worker_task, "activity_worker", 8192, NULL, 9, &s_act_worker_task);
     xTaskCreatePinnedToCore(stroke_task, "stroke",
                             6144, NULL, 3, NULL, 0);
 

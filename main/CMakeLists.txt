@@ -21,4 +21,5 @@ idf_component_register(
         rtc_pcf85063
         pwr_key
         battery_drv
+        activity
 )
