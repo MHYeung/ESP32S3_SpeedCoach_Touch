@@ -22,4 +22,5 @@ idf_component_register(
         pwr_key
         battery_drv
         activity
+        activity_log
 )

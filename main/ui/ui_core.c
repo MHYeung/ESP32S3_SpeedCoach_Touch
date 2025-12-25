@@ -422,21 +422,27 @@ static void stop_save_prompt_create(void *unused)
     lv_obj_set_width(msg, 240);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 34);
 
-    lv_obj_t *btn_cancel = lv_btn_create(panel);
-    lv_obj_set_size(btn_cancel, 110, 45);
-    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_add_event_cb(btn_cancel, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"cancel");
-    lv_obj_t *lc = lv_label_create(btn_cancel);
-    lv_label_set_text(lc, "Cancel");
-    lv_obj_center(lc);
-
     lv_obj_t *btn_stop = lv_btn_create(panel);
     lv_obj_set_size(btn_stop, 110, 45);
-    lv_obj_align(btn_stop, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_align(btn_stop, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     lv_obj_add_event_cb(btn_stop, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"stop_save");
     lv_obj_t *ls = lv_label_create(btn_stop);
     lv_label_set_text(ls, "Save");
     lv_obj_center(ls);
+
+    lv_obj_t *btn_cancel = lv_btn_create(panel);
+    lv_obj_set_size(btn_cancel, 110, 45);
+    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_add_event_cb(btn_cancel, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"cancel");
+    lv_obj_t *lc = lv_label_create(btn_cancel);
+    lv_label_set_text(lc, "Cancel");
+    lv_obj_center(lc);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x6C757D), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(btn_cancel, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x5A6369), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn_cancel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(btn_cancel, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(lc, lv_color_hex(0xFFFFFF), 0);
 }
 
 void ui_show_stop_save_prompt(void)

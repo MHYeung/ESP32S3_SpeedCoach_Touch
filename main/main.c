@@ -19,6 +19,7 @@
 #include "battery_drv.h"
 #include "pwr_key.h"
 #include "activity.h"
+#include "activity_log.h"
 
 #include "esp_timer.h"
 
@@ -29,6 +30,8 @@
 #include "ui_status_bar.h"
 
 static const char *TAG = "app";
+
+#define LOG_QUEUE_LEN 32
 
 /* ---------- Kconfig-based touch pins ---------- */
 
@@ -66,6 +69,11 @@ static uint32_t s_last_stroke_count_seen = 0;  // latest raw stroke counter from
 static uint32_t s_last_session_stroke_count = 0; // baseline for session delta
 
 static SemaphoreHandle_t s_activity_mutex = NULL;
+
+/* Activity Log */
+static QueueHandle_t s_log_q = NULL;
+static TaskHandle_t s_log_task = NULL;
+static activity_log_t s_act_log;
 
 /* LVGL display + input */
 static lv_disp_t *s_disp = NULL;
@@ -225,6 +233,11 @@ static void activity_worker_task(void *arg)
             activity_init(&s_activity, id);
             activity_start(&s_activity, time(NULL));
 
+            if (s_sd.mounted) {
+                // open per-stroke CSV named by start time: YYYYMMDDHHMM_xx.csv
+                activity_log_start(&s_act_log, &s_sd, s_activity.start_ts, s_activity.id);
+            }
+
             // baseline will be set by stroke_task on first cycle
             s_last_session_stroke_count = 0;
 
@@ -244,6 +257,8 @@ static void activity_worker_task(void *arg)
             data_page_show_activity_toast(false);
             ESP_LOGI("ACT", "STOP id=%lu", (unsigned long)snapshot.id);
 
+            activity_log_stop(&s_act_log);
+
             if (s_sd.mounted) {
                 esp_err_t e = activity_save_to_sd(&s_sd, &snapshot, true);
                 ESP_LOGI("ACT", "Saved: %s", esp_err_to_name(e));
@@ -259,6 +274,25 @@ static void on_stop_save_confirmed(void)
     act_cmd_t cmd = ACT_CMD_STOP_SAVE;
     xQueueSend(s_act_q, &cmd, 0);
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Logger Tasks                                                              */
+/* -------------------------------------------------------------------------- */
+static void activity_logger_task(void *arg)
+{
+    (void)arg;
+
+    activity_log_row_t row;
+    for (;;) {
+        if (xQueueReceive(s_log_q, &row, portMAX_DELAY) == pdTRUE) {
+            // Only append if file is open
+            if (s_act_log.opened) {
+                activity_log_append(&s_act_log, &row);
+            }
+        }
+    }
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*  SETTINGS CALLBACKS (from Settings tab)                                    */
@@ -431,55 +465,57 @@ static void stroke_task(void *arg)
                 s_last_spm_t_s = t_s;
             }
 
-            // ---- Activity logic (session timer + activity model) ----
-            float ui_time_s = 0.0f;
-            uint32_t ui_strokes = 0;
+            float spm_raw = s_last_valid_spm;
+            if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_raw = NAN;
+            if (!isfinite(spm_raw)) spm_raw = 0.0f;
 
             // If you’ll later add GPS speed/distance: fill these in here
             float speed_mps = 0.0f;
             float power_w   = 0.0f;
             float dist_delta_m = 0.0f;
 
+            activity_log_row_t row;
+            bool need_log = false;
+
             if (s_activity_mutex) xSemaphoreTake(s_activity_mutex, portMAX_DELAY);
 
             if (s_activity_recording) {
-                // Session time counts only when recording
                 s_session_time_s += dt_s;
 
-                // Baseline stroke count on first recording cycle
-                if (s_last_session_stroke_count == 0) {
-                    s_last_session_stroke_count = s_latest_detector_strokes;
-                }
+                uint32_t stroke_delta = (ev == STROKE_EVENT_CATCH) ? 1 : 0;
 
-                uint32_t stroke_delta = 0;
-                if (s_latest_detector_strokes >= s_last_session_stroke_count) {
-                    stroke_delta = s_latest_detector_strokes - s_last_session_stroke_count;
-                }
-                s_last_session_stroke_count = s_latest_detector_strokes;
-
-                float spm_raw = (isfinite(s_last_valid_spm) ? s_last_valid_spm : NAN);
-                float spm_for_act = (isfinite(spm_raw) ? spm_raw : 0.0f);
-                //float spm_for_act = (isfinite(s_last_valid_spm) ? s_last_valid_spm : 0.0f);
-
-                // Update activity summary stats
                 activity_update(&s_activity,
                                 dt_s,
-                                speed_mps,
-                                spm_for_act,
-                                power_w,
-                                dist_delta_m,
+                                0.0f,      // speed_mps (GPS later)
+                                spm_raw,    // RAW for saving/stats
+                                0.0f,      // power_w
+                                0.0f,      // dist_delta_m
                                 stroke_delta);
+
+                // Only log on stroke event (CATCH)
+                if (ev == STROKE_EVENT_CATCH) {
+                    row.epoch_ts = time(NULL);                  // replace with RTC epoch if you want
+                    row.session_time_s = s_session_time_s;
+                    row.session_stroke_idx = s_activity.stroke_count; // session count after update
+                    row.spm_raw = spm_raw;
+                    row.stroke_period_s = m.stroke_period_s;
+                    row.speed_mps = 0.0f;
+                    row.distance_m = s_activity.distance_m;
+                    row.drive_time_s = m.drive_time_s;
+                    row.recovery_time_s = m.recovery_time_s;
+                    need_log = true;
+                }
             } else {
-                // Not recording: keep at 0 (or freeze last session if you prefer)
-                // Here we keep it at 0 as you requested.
+                // not recording (your chosen behavior)
                 s_session_time_s = 0.0f;
-                s_last_session_stroke_count = 0;
             }
 
-            ui_time_s  = s_session_time_s;
-            ui_strokes = s_activity.stroke_count;
-
             if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
+
+            // Enqueue OUTSIDE the mutex (fast, non-blocking)
+            if (need_log && s_log_q) {
+                xQueueSend(s_log_q, &row, 0); // drop if queue full
+            }
             // ---- End activity logic ----
 
             // ---- UI update at 10Hz ----
@@ -630,6 +666,10 @@ void app_main(void)
     s_act_q = xQueueCreate(4, sizeof(act_cmd_t));
     assert(s_act_q);
 
+    s_log_q = xQueueCreate(LOG_QUEUE_LEN, sizeof(activity_log_row_t));
+    assert(s_log_q);
+
+    xTaskCreate(activity_logger_task, "activity_logger", 6144, NULL, 6, NULL);
     xTaskCreate(activity_worker_task, "activity_worker", 8192, NULL, 9, &s_act_worker_task);
     xTaskCreatePinnedToCore(stroke_task, "stroke",
                             6144, NULL, 3, NULL, 0);
