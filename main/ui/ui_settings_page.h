@@ -11,3 +11,5 @@ void settings_page_set_gps_status(bool connected, uint8_t bars_0_to_4);
 
 /* Keep the Settings switch in sync with the active theme. */
 void settings_page_set_dark_mode_state(bool enabled);
+
+void settings_page_on_orientation_changed(void);

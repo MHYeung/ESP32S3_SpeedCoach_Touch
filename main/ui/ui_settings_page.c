@@ -109,6 +109,13 @@ static lv_obj_t *device_name_value_label   = NULL;
 static bool s_header_swipe_armed = false;
 static lv_point_t s_header_swipe_sum = {0};
 
+void settings_page_on_orientation_changed(void)
+{
+    // called while LVGL is locked
+    ui_status_bar_force_refresh(&s_status);
+}
+
+
 static void settings_header_swipe_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);

@@ -24,6 +24,11 @@ static lv_point_t s_settings_swipe_sum = {0};
 /* Shutdown Dialog */
 static ui_shutdown_confirm_cb_t s_shutdown_confirm_cb = NULL;
 static lv_obj_t *s_shutdown_overlay = NULL;
+static lv_obj_t *s_shutdown_btn_box = NULL;
+static lv_obj_t *s_btn_shutdown = NULL;
+static lv_obj_t *s_btn_cancel = NULL;
+static lv_obj_t *s_shutdown_panel = NULL;
+static lv_obj_t *s_shutdown_msg = NULL;
 
 /* Stop and Save Dialog*/
 static ui_stop_save_confirm_cb_t s_stop_save_confirm_cb = NULL;
@@ -94,31 +99,45 @@ bool ui_get_dark_mode(void)
     return s_dark_mode;
 }
 
+static bool ui_is_landscape(void)
+{
+    lv_display_t *disp = lv_disp_get_default();
+    lv_display_rotation_t r = lv_display_get_rotation(disp);
+    return (r == LV_DISPLAY_ROTATION_90 || r == LV_DISPLAY_ROTATION_270);
+}
+
 /* ---------- Orientation + navigation ---------- */
 
 static void top_swipe_event_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = (lv_indev_t *)lv_event_get_param(e);
-    if (!indev) return;
+    if (!indev)
+        return;
 
-    if (s_transitioning) return;
-    if (s_current_page != UI_PAGE_DATA) return;
+    if (s_transitioning)
+        return;
+    if (s_current_page != UI_PAGE_DATA)
+        return;
 
-    if (code == LV_EVENT_PRESSED) {
+    if (code == LV_EVENT_PRESSED)
+    {
         s_top_swipe_sum.x = 0;
         s_top_swipe_sum.y = 0;
         s_top_swipe_armed = true;
         return;
     }
 
-    if (code == LV_EVENT_RELEASED) {
+    if (code == LV_EVENT_RELEASED)
+    {
         s_top_swipe_armed = false;
         return;
     }
 
-    if (code != LV_EVENT_PRESSING) return;
-    if (!s_top_swipe_armed) return;
+    if (code != LV_EVENT_PRESSING)
+        return;
+    if (!s_top_swipe_armed)
+        return;
 
     lv_point_t v;
     lv_indev_get_vect(indev, &v);
@@ -126,8 +145,10 @@ static void top_swipe_event_cb(lv_event_t *e)
     s_top_swipe_sum.y += v.y;
 
     const int32_t min_px = 30;
-    if (s_top_swipe_sum.y < min_px) return;
-    if (s_top_swipe_sum.y < (LV_ABS(s_top_swipe_sum.x) + 10)) return;
+    if (s_top_swipe_sum.y < min_px)
+        return;
+    if (s_top_swipe_sum.y < (LV_ABS(s_top_swipe_sum.x) + 10))
+        return;
 
     s_top_swipe_armed = false;
     lv_indev_stop_processing(indev);
@@ -139,25 +160,32 @@ static void settings_bottom_swipe_event_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = (lv_indev_t *)lv_event_get_param(e);
-    if (!indev) return;
+    if (!indev)
+        return;
 
-    if (s_transitioning) return;
-    if (s_current_page != UI_PAGE_SETTINGS) return;
+    if (s_transitioning)
+        return;
+    if (s_current_page != UI_PAGE_SETTINGS)
+        return;
 
-    if (code == LV_EVENT_PRESSED) {
+    if (code == LV_EVENT_PRESSED)
+    {
         s_settings_swipe_sum.x = 0;
         s_settings_swipe_sum.y = 0;
         s_settings_swipe_armed = true;
         return;
     }
 
-    if (code == LV_EVENT_RELEASED) {
+    if (code == LV_EVENT_RELEASED)
+    {
         s_settings_swipe_armed = false;
         return;
     }
 
-    if (code != LV_EVENT_PRESSING) return;
-    if (!s_settings_swipe_armed) return;
+    if (code != LV_EVENT_PRESSING)
+        return;
+    if (!s_settings_swipe_armed)
+        return;
 
     lv_point_t v;
     lv_indev_get_vect(indev, &v);
@@ -165,8 +193,10 @@ static void settings_bottom_swipe_event_cb(lv_event_t *e)
     s_settings_swipe_sum.y += v.y;
 
     const int32_t min_px = 30;
-    if (s_settings_swipe_sum.y > -min_px) return;
-    if (LV_ABS(s_settings_swipe_sum.y) < (LV_ABS(s_settings_swipe_sum.x) + 10)) return;
+    if (s_settings_swipe_sum.y > -min_px)
+        return;
+    if (LV_ABS(s_settings_swipe_sum.y) < (LV_ABS(s_settings_swipe_sum.x) + 10))
+        return;
 
     s_settings_swipe_armed = false;
     lv_indev_stop_processing(indev);
@@ -182,8 +212,10 @@ static void anim_set_y(void *var, int32_t v)
 static void anim_settings_close_done(lv_anim_t *a)
 {
     (void)a;
-    if (s_page_settings) lv_obj_add_flag(s_page_settings, LV_OBJ_FLAG_HIDDEN);
-    if (s_top_gesture) {
+    if (s_page_settings)
+        lv_obj_add_flag(s_page_settings, LV_OBJ_FLAG_HIDDEN);
+    if (s_top_gesture)
+    {
         lv_obj_clear_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_top_gesture);
     }
@@ -200,38 +232,50 @@ static void anim_settings_open_done(lv_anim_t *a)
 
 static void ui_pages_relayout(void)
 {
-    if (!s_scr) return;
+    if (!s_scr)
+        return;
 
-    if (s_page_data) {
+    if (s_page_data)
+    {
         lv_obj_set_size(s_page_data, lv_pct(100), lv_pct(100));
         lv_obj_set_pos(s_page_data, 0, 0);
     }
 
     lv_coord_t h = lv_obj_get_height(s_scr);
-    if (s_page_settings) {
+    if (s_page_settings)
+    {
         lv_obj_set_size(s_page_settings, lv_pct(100), lv_pct(100));
-        if (s_current_page == UI_PAGE_SETTINGS) {
+        if (s_current_page == UI_PAGE_SETTINGS)
+        {
             lv_obj_set_pos(s_page_settings, 0, 0);
             lv_obj_clear_flag(s_page_settings, LV_OBJ_FLAG_HIDDEN);
-        } else {
+        }
+        else
+        {
             lv_obj_set_pos(s_page_settings, 0, -h);
             lv_obj_add_flag(s_page_settings, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
-    if (s_top_gesture) {
+    if (s_top_gesture)
+    {
         lv_obj_set_size(s_top_gesture, lv_pct(100), lv_pct(10));
         lv_obj_set_pos(s_top_gesture, 0, 0);
-        if (s_current_page == UI_PAGE_DATA && !s_transitioning) lv_obj_clear_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
+        if (s_current_page == UI_PAGE_DATA && !s_transitioning)
+            lv_obj_clear_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_top_gesture);
     }
 
-    if (s_settings_bottom_gesture) {
+    if (s_settings_bottom_gesture)
+    {
         lv_obj_set_size(s_settings_bottom_gesture, lv_pct(100), lv_pct(15));
         lv_obj_align(s_settings_bottom_gesture, LV_ALIGN_BOTTOM_MID, 0, 0);
-        if (s_current_page == UI_PAGE_SETTINGS && !s_transitioning) lv_obj_clear_flag(s_settings_bottom_gesture, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(s_settings_bottom_gesture, LV_OBJ_FLAG_HIDDEN);
+        if (s_current_page == UI_PAGE_SETTINGS && !s_transitioning)
+            lv_obj_clear_flag(s_settings_bottom_gesture, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(s_settings_bottom_gesture, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_settings_bottom_gesture);
     }
 }
@@ -259,6 +303,7 @@ void ui_set_orientation(ui_orientation_t o)
     lvgl_port_lock(0);
     lv_display_set_rotation(s_disp, rot);
     ui_pages_relayout();
+    settings_page_on_orientation_changed();
     lvgl_port_unlock();
 
     /* data_page_set_orientation() locks internally */
@@ -267,20 +312,25 @@ void ui_set_orientation(ui_orientation_t o)
 
 void ui_go_to_page(ui_page_t page, bool animated)
 {
-    if (page >= UI_PAGE_COUNT) return;
-    if (page == s_current_page) return;
-    if (s_transitioning) return;
+    if (page >= UI_PAGE_COUNT)
+        return;
+    if (page == s_current_page)
+        return;
+    if (s_transitioning)
+        return;
 
     lvgl_port_lock(0);
 
-    if (!s_scr || !s_page_settings || !s_page_data) {
+    if (!s_scr || !s_page_settings || !s_page_data)
+    {
         lvgl_port_unlock();
         return;
     }
 
     lv_coord_t h = lv_obj_get_height(s_scr);
 
-    if (!animated) {
+    if (!animated)
+    {
         s_current_page = page;
         s_transitioning = false;
         ui_pages_relayout();
@@ -295,7 +345,8 @@ void ui_go_to_page(ui_page_t page, bool animated)
     lv_anim_set_time(&a, 220);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
 
-    if (page == UI_PAGE_SETTINGS) {
+    if (page == UI_PAGE_SETTINGS)
+    {
         s_current_page = UI_PAGE_SETTINGS;
         s_transitioning = true;
 
@@ -305,8 +356,11 @@ void ui_go_to_page(ui_page_t page, bool animated)
         lv_anim_set_values(&a, -h, 0);
         lv_anim_set_completed_cb(&a, anim_settings_open_done);
 
-        if (s_top_gesture) lv_obj_add_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
-    } else {
+        if (s_top_gesture)
+            lv_obj_add_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
         s_current_page = UI_PAGE_DATA;
         s_transitioning = true;
 
@@ -315,7 +369,8 @@ void ui_go_to_page(ui_page_t page, bool animated)
         lv_anim_set_values(&a, 0, -h);
         lv_anim_set_completed_cb(&a, anim_settings_close_done);
 
-        if (s_top_gesture) lv_obj_add_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
+        if (s_top_gesture)
+            lv_obj_add_flag(s_top_gesture, LV_OBJ_FLAG_HIDDEN);
     }
 
     lv_anim_start(&a);
@@ -373,21 +428,26 @@ static void create_pages_ui(void)
     ui_pages_relayout();
 }
 
-
 /* Stop Save Prompt*/
 static void stop_save_btn_event_cb(lv_event_t *e)
 {
     const char *tag = (const char *)lv_event_get_user_data(e);
-    if (!tag) return;
+    if (!tag)
+        return;
 
-    if (s_stop_save_overlay) {
+    if (s_stop_save_overlay)
+    {
         lv_obj_del(s_stop_save_overlay);
         s_stop_save_overlay = NULL;
     }
 
-    if (strcmp(tag, "stop_save") == 0) {
-        if (s_stop_save_confirm_cb) s_stop_save_confirm_cb();
-    } else {
+    if (strcmp(tag, "stop_save") == 0)
+    {
+        if (s_stop_save_confirm_cb)
+            s_stop_save_confirm_cb();
+    }
+    else
+    {
         // cancel -> do nothing (continue recording)
     }
 }
@@ -395,7 +455,8 @@ static void stop_save_btn_event_cb(lv_event_t *e)
 static void stop_save_prompt_create(void *unused)
 {
     (void)unused;
-    if (s_stop_save_overlay) return;
+    if (s_stop_save_overlay)
+        return;
 
     lv_obj_t *top = lv_layer_top();
 
@@ -406,7 +467,7 @@ static void stop_save_prompt_create(void *unused)
     lv_obj_clear_flag(s_stop_save_overlay, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *panel = lv_obj_create(s_stop_save_overlay);
-    lv_obj_set_size(panel, 280, 180);
+    lv_obj_set_size(panel, ui_is_landscape() ? 280 : 200, ui_is_landscape() ? 180 : 200);
     lv_obj_center(panel);
     lv_obj_set_style_pad_all(panel, 14, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -419,21 +480,21 @@ static void stop_save_prompt_create(void *unused)
     lv_obj_t *msg = lv_label_create(panel);
     lv_label_set_text(msg, "Stop and save this session?");
     lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(msg, 240);
+    lv_obj_set_width(msg, ui_is_landscape() ? 240 : 180);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 34);
 
     lv_obj_t *btn_stop = lv_btn_create(panel);
-    lv_obj_set_size(btn_stop, 110, 45);
+    lv_obj_set_size(btn_stop, ui_is_landscape() ? 110 : 90, ui_is_landscape() ? 45 : 60);
     lv_obj_align(btn_stop, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_add_event_cb(btn_stop, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"stop_save");
+    lv_obj_add_event_cb(btn_stop, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void *)"stop_save");
     lv_obj_t *ls = lv_label_create(btn_stop);
     lv_label_set_text(ls, "Save");
     lv_obj_center(ls);
 
     lv_obj_t *btn_cancel = lv_btn_create(panel);
-    lv_obj_set_size(btn_cancel, 110, 45);
+    lv_obj_set_size(btn_cancel, ui_is_landscape() ? 110 : 90, ui_is_landscape() ? 45 : 60);
     lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_add_event_cb(btn_cancel, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void*)"cancel");
+    lv_obj_add_event_cb(btn_cancel, stop_save_btn_event_cb, LV_EVENT_CLICKED, (void *)"cancel");
     lv_obj_t *lc = lv_label_create(btn_cancel);
     lv_label_set_text(lc, "Cancel");
     lv_obj_center(lc);
@@ -454,15 +515,19 @@ void ui_show_stop_save_prompt(void)
 static void shutdown_btn_event_cb(lv_event_t *e)
 {
     const char *tag = (const char *)lv_event_get_user_data(e);
-    if (!tag) return;
+    if (!tag)
+        return;
 
-    if (s_shutdown_overlay) {
+    if (s_shutdown_overlay)
+    {
         lv_obj_del(s_shutdown_overlay);
         s_shutdown_overlay = NULL;
     }
 
-    if (strcmp(tag, "shutdown") == 0) {
-        if (s_shutdown_confirm_cb) s_shutdown_confirm_cb();
+    if (strcmp(tag, "shutdown") == 0)
+    {
+        if (s_shutdown_confirm_cb)
+            s_shutdown_confirm_cb();
     }
 }
 
@@ -471,7 +536,8 @@ static void shutdown_prompt_create(void *unused)
     (void)unused;
 
     // If already open, don’t create twice
-    if (s_shutdown_overlay) return;
+    if (s_shutdown_overlay)
+        return;
 
     lv_obj_t *top = lv_layer_top();
 
@@ -484,7 +550,7 @@ static void shutdown_prompt_create(void *unused)
 
     // Center panel
     lv_obj_t *panel = lv_obj_create(s_shutdown_overlay);
-    lv_obj_set_size(panel, 280, 180);
+    lv_obj_set_size(panel, ui_is_landscape() ? 280 : 200, ui_is_landscape() ? 180 : 200);
     lv_obj_center(panel);
     lv_obj_set_style_pad_all(panel, 14, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -497,38 +563,55 @@ static void shutdown_prompt_create(void *unused)
     lv_obj_t *msg = lv_label_create(panel);
     lv_label_set_text(msg, "Shut the device down now?");
     lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(msg, 220);
+    lv_obj_set_width(msg, ui_is_landscape() ? 240 : 180);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 30);
 
     // Buttons row
-    lv_obj_t *btn_shutdown = lv_btn_create(panel);
-    lv_obj_set_size(btn_shutdown, 110, 45);
-    lv_obj_align(btn_shutdown, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_add_event_cb(btn_shutdown, shutdown_btn_event_cb, LV_EVENT_CLICKED, (void*)"shutdown");
-    lv_obj_t *ls = lv_label_create(btn_shutdown);
+    s_shutdown_btn_box = lv_obj_create(panel);
+    lv_obj_clear_flag(s_shutdown_btn_box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(s_shutdown_btn_box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_shutdown_btn_box, 0, 0);
+    lv_obj_set_style_pad_all(s_shutdown_btn_box, 0, 0);
+
+    // anchor container to bottom middle; it will grow with content
+    lv_obj_set_width(s_shutdown_btn_box, lv_pct(100));
+    lv_obj_set_height(s_shutdown_btn_box, LV_SIZE_CONTENT);
+    lv_obj_align(s_shutdown_btn_box, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    // Flex defaults (will be updated by relayout)
+    lv_obj_set_flex_flow(s_shutdown_btn_box, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_shutdown_btn_box,
+                          LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    // Create buttons INSIDE the container (no lv_obj_align on buttons!)
+    s_btn_shutdown = lv_btn_create(s_shutdown_btn_box);
+    lv_obj_add_event_cb(s_btn_shutdown, shutdown_btn_event_cb, LV_EVENT_CLICKED, (void *)"shutdown");
+    lv_obj_t *ls = lv_label_create(s_btn_shutdown);
     lv_label_set_text(ls, "Shutdown");
     lv_obj_center(ls);
-    lv_obj_set_style_bg_color(btn_shutdown, lv_color_hex(0xD9534F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(btn_shutdown, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(btn_shutdown, lv_color_hex(0xB52A2A), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(btn_shutdown, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(btn_shutdown, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(ls, lv_color_hex(0xFFFFFF), 0);
 
-    lv_obj_t *btn_cancel = lv_btn_create(panel);
-    lv_obj_set_size(btn_cancel, 110, 45);
-    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_add_event_cb(btn_cancel, shutdown_btn_event_cb, LV_EVENT_CLICKED, (void*)"cancel");
-    lv_obj_t *lc = lv_label_create(btn_cancel);
+    s_btn_cancel = lv_btn_create(s_shutdown_btn_box);
+    lv_obj_add_event_cb(s_btn_cancel, shutdown_btn_event_cb, LV_EVENT_CLICKED, (void *)"cancel");
+    lv_obj_t *lc = lv_label_create(s_btn_cancel);
     lv_label_set_text(lc, "Cancel");
     lv_obj_center(lc);
-    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x6C757D), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(btn_cancel, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x5A6369), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(btn_cancel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(btn_cancel, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(lc, lv_color_hex(0xFFFFFF), 0);
 
+
+    lv_obj_set_style_bg_color(s_btn_shutdown, lv_color_hex(0xD9534F), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_btn_shutdown, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_btn_shutdown, lv_color_hex(0xB52A2A), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(s_btn_shutdown, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_btn_shutdown, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(ls, lv_color_hex(0xFFFFFF), 0);
+
+    lv_obj_set_style_bg_color(s_btn_cancel, lv_color_hex(0x6C757D), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_btn_cancel, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_btn_cancel, lv_color_hex(0x5A6369), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(s_btn_cancel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_btn_cancel, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(lc, lv_color_hex(0xFFFFFF), 0);
 }
 
 void ui_show_shutdown_prompt(void)
@@ -536,7 +619,6 @@ void ui_show_shutdown_prompt(void)
     // Thread-safe: schedule on LVGL context
     lv_async_call(shutdown_prompt_create, NULL);
 }
-
 
 /* ---------- Public init ---------- */
 
