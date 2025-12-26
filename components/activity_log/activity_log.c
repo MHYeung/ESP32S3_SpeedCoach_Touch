@@ -68,7 +68,7 @@ esp_err_t activity_log_start(activity_log_t *log,
     // Header
     // epoch_ts,session_time_s,stroke_idx,spm_raw,stroke_period_s,speed_mps,distance_m
     fprintf(log->fp,
-            "epoch_ts,session_time_s,stroke_idx,spm_raw,stroke_period_s,speed_mps,distance_m,drive_time_s,recovery_time_s\n");
+    "epoch_ts,session_time_s,stroke_idx,spm_raw,stroke_period_s,speed_mps,distance_m,lat_deg,lon_deg,drive_time_s,recovery_time_s\n");
 
     log->opened = true;
     log->pending = 0;
@@ -85,7 +85,7 @@ esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row
     // Keep full decimals for spm_raw in file:
     // Use %.3f for SPM raw, adjust later if you want more precision.
     fprintf(log->fp,
-            "%ld,%.3f,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+            "%ld,%.3f,%lu,%.3f,%.3f,%.3f,%.3f,%.7f,%.7f,%.3f,%.3f\n",
             (long)row->epoch_ts,
             (double)row->session_time_s,
             (unsigned long)row->session_stroke_idx,
@@ -93,6 +93,8 @@ esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row
             (double)row->stroke_period_s,
             (double)row->speed_mps,
             (double)row->distance_m,
+            row->lat_deg,
+            row->lon_deg,
             (double)row->drive_time_s,
             (double)row->recovery_time_s
         );

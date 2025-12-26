@@ -19,13 +19,17 @@ typedef struct {
     float    spm_raw;             // full precision (for saving)
     float    stroke_period_s;     // period between strokes (if available)
 
-    // placeholders for future (GPS etc.)
-    float    speed_mps;
-    float    distance_m;          // cumulative session distance (m)
+    //GPS related data
+    float  speed_mps;
+    float  distance_m;  
+    double lat_deg;
+    double lon_deg;
 
     //Drive to Recovery Ratio Calculation
     float drive_time_s;
     float recovery_time_s;
+
+    
 } activity_log_row_t;
 
 typedef struct {

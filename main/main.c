@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_sleep.h"
+#include "driver/uart.h"
+#include "nvs_flash.h"
 
 #include "lcd_st7789.h"
 #include "touch_cst328.h"
@@ -20,7 +22,10 @@
 #include "pwr_key.h"
 #include "activity.h"
 #include "activity_log.h"
+#include "gps_gtu8.h"
 
+#include <sys/time.h>
+#include <time.h>
 #include "esp_timer.h"
 
 #include "ui/ui.h" // our new UI module
@@ -65,14 +70,12 @@ static uint32_t s_activity_next_id = 1;
 static float s_session_time_s = 0.0f;          // session timer shown on data page
 static int64_t s_session_last_us = 0;          // for dt computation
 
-static uint32_t s_last_stroke_count_seen = 0;  // latest raw stroke counter from detector (boot-based)
 static uint32_t s_last_session_stroke_count = 0; // baseline for session delta
 
 static SemaphoreHandle_t s_activity_mutex = NULL;
 
 /* Activity Log */
 static QueueHandle_t s_log_q = NULL;
-static TaskHandle_t s_log_task = NULL;
 static activity_log_t s_act_log;
 
 /* LVGL display + input */
@@ -86,12 +89,74 @@ static stroke_detection_t s_stroke;
 /* Change this to pick a fixed UI orientation at boot */
 static ui_orientation_t s_current_orient = UI_ORIENT_LANDSCAPE_270;
 static bool s_auto_rotate_enabled = false;
-static bool s_auto_rotate_locked = false;
 
 /* Last touch point */
 static int16_t s_last_touch_x = 0;
 static int16_t s_last_touch_y = 0;
 
+/* ===========================================================
+ *  GPS GT-U8 Setup
+ * ===========================================================
+ */
+static bool s_time_synced_from_gps = false;
+
+static time_t mktime_utc(struct tm *t)
+{
+    // mktime interprets as local time. Convert as UTC by temporarily setting TZ.
+    char *old = getenv("TZ");
+    char old_copy[64] = {0};
+    if (old) strncpy(old_copy, old, sizeof(old_copy)-1);
+
+    setenv("TZ", "UTC0", 1);
+    tzset();
+    time_t epoch = mktime(t);
+
+    if (old) setenv("TZ", old_copy, 1);
+    else unsetenv("TZ");
+    tzset();
+
+    return epoch;
+}
+
+static void gps_fix_cb(const gps_fix_t *fix, void *user)
+{
+    (void)user;
+    if (!fix) return;
+
+    if (!s_time_synced_from_gps && fix->valid_time && fix->valid_date) {
+        // 1) set system time (epoch in UTC)
+        struct tm t = fix->utc_tm;
+        time_t epoch_utc = mktime_utc(&t);
+        if (epoch_utc > 1700000000) { // sanity check (>= ~2023)
+            struct timeval tv = {.tv_sec = epoch_utc, .tv_usec = 0};
+            settimeofday(&tv, NULL);
+
+            // 2) convert to local time (Taiwan = UTC+8, no DST)
+            setenv("TZ", "CST-8", 1);
+            tzset();
+
+            struct tm local_tm;
+            localtime_r(&epoch_utc, &local_tm);
+
+            datetime_t dt = {0};
+            dt.year   = local_tm.tm_year + 1900;
+            dt.month  = local_tm.tm_mon + 1;
+            dt.day    = local_tm.tm_mday;
+            dt.dotw   = local_tm.tm_wday; // check your RTC expects 0=Sun; adjust if needed
+            dt.hour   = local_tm.tm_hour;
+            dt.minute = local_tm.tm_min;
+            dt.second = local_tm.tm_sec;
+
+            PCF85063_set_date(dt);
+            PCF85063_set_time(dt);
+
+            s_time_synced_from_gps = true;
+        }
+    }
+    ESP_LOGI("GPS", "fix=%d time=%d date=%d lat=%.7f lon=%.7f speed=%.2f sats=%d hdop=%.1f",
+         fix->valid_fix, fix->valid_time, fix->valid_date,
+         fix->lat_deg, fix->lon_deg, fix->speed_mps, fix->sats, fix->hdop);
+}
 
 /* ===========================================================
  *  TOUCH → LVGL INPUT CALLBACK
@@ -382,6 +447,11 @@ static void stroke_task(void *arg)
 {
     (void)arg;
 
+    // GPS smoothing state (Doppler speed is usually best for distance integration)
+    static float  s_gps_speed_filt = NAN;
+    static double s_gps_lat = NAN;
+    static double s_gps_lon = NAN;
+
     const float fs_hz = 200.0f;
     const stroke_detection_cfg_t cfg = {
         .fs_hz = fs_hz,
@@ -413,9 +483,6 @@ static void stroke_task(void *arg)
     static float s_last_valid_spm = NAN;
     static float s_last_spm_t_s = -1.0f;
 
-    // Keep a “latest” detector count so START can baseline
-    static uint32_t s_latest_detector_strokes = 0;
-
     while (1) {
         float ax, ay, az, gx, gy, gz;
         esp_err_t err = qmi8658_read_accel_gyro(&s_imu, &ax, &ay, &az, &gx, &gy, &gz);
@@ -432,9 +499,6 @@ static void stroke_task(void *arg)
             // Stroke detection
             stroke_metrics_t m = {0};
             stroke_event_t ev = stroke_detection_update(&s_stroke, t_s, ax, ay, az, gx, gy, gz, &m);
-
-            // Track latest detector stroke count
-            s_latest_detector_strokes = m.stroke_count;
 
             // Optional debug
             if (ev != STROKE_EVENT_NONE) {
@@ -469,10 +533,32 @@ static void stroke_task(void *arg)
             if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_raw = NAN;
             if (!isfinite(spm_raw)) spm_raw = 0.0f;
 
-            // If you’ll later add GPS speed/distance: fill these in here
-            float speed_mps = 0.0f;
-            float power_w   = 0.0f;
-            float dist_delta_m = 0.0f;
+            // ---- GPS fetch (non-blocking) ----
+            gps_fix_t fix;
+            bool gps_ok = false;
+
+            if (gps_gtu8_get_latest(&fix)) {
+                int64_t age_us = esp_timer_get_time() - fix.rx_time_us;
+
+                // accept only "fresh" fixes
+                if (fix.valid_fix && isfinite(fix.speed_mps) && age_us < 2000000) {
+                    gps_ok = true;
+                    s_gps_lat = fix.lat_deg;
+                    s_gps_lon = fix.lon_deg;
+
+                    // 1st-order low-pass on speed
+                    const float tau = 1.0f;                    // 1s time constant (tune)
+                    float alpha = dt_s / (tau + dt_s);
+
+                    if (!isfinite(s_gps_speed_filt)) s_gps_speed_filt = fix.speed_mps;
+                    else s_gps_speed_filt += alpha * (fix.speed_mps - s_gps_speed_filt);
+                }
+            }
+
+            float speed_mps = gps_ok ? s_gps_speed_filt : 0.0f;
+
+            // integrate distance continuously while recording
+            float dist_delta_m = speed_mps * dt_s;
 
             activity_log_row_t row;
             bool need_log = false;
@@ -486,10 +572,10 @@ static void stroke_task(void *arg)
 
                 activity_update(&s_activity,
                                 dt_s,
-                                0.0f,      // speed_mps (GPS later)
+                                speed_mps,      // speed_mps (GPS later)
                                 spm_raw,    // RAW for saving/stats
                                 0.0f,      // power_w
-                                0.0f,      // dist_delta_m
+                                dist_delta_m,      // dist_delta_m
                                 stroke_delta);
 
                 // Only log on stroke event (CATCH)
@@ -499,8 +585,10 @@ static void stroke_task(void *arg)
                     row.session_stroke_idx = s_activity.stroke_count; // session count after update
                     row.spm_raw = spm_raw;
                     row.stroke_period_s = m.stroke_period_s;
-                    row.speed_mps = 0.0f;
+                    row.speed_mps = speed_mps;
                     row.distance_m = s_activity.distance_m;
+                    row.lat_deg = gps_ok ? s_gps_lat : NAN;
+                    row.lon_deg = gps_ok ? s_gps_lon : NAN;
                     row.drive_time_s = m.drive_time_s;
                     row.recovery_time_s = m.recovery_time_s;
                     need_log = true;
@@ -544,14 +632,16 @@ static void stroke_task(void *arg)
 
                 bool recording = s_activity_recording;
 
+                float pace = (speed_mps > 0.2f) ? (500.0f / speed_mps) : NAN;
+
                 data_values_t v = {
-                    .time_s = recording ? s_session_time_s : NAN,                 // hide when not recording
-                    .distance_m = NAN,
-                    .pace_s_per_500m = NAN,
-                    .speed_mps = NAN,
-                    .spm = spm_disp,                                               // <-- keep visible ALWAYS
+                    .time_s = recording ? s_session_time_s : NAN,
+                    .distance_m = recording ? s_activity.distance_m : NAN,
+                    .pace_s_per_500m = recording ? pace : NAN,
+                    .speed_mps = recording ? speed_mps : NAN,
+                    .spm = spm_disp,
                     .power_w = NAN,
-                    .stroke_count = recording ? s_activity.stroke_count : UINT32_MAX, // hide when not recording
+                    .stroke_count = recording ? s_activity.stroke_count : UINT32_MAX,
                 };
                 data_page_set_values(&v);
             }
@@ -618,6 +708,70 @@ static void init_touch_and_lvgl_input(void)
     lv_indev_set_display(s_indev_touch, s_disp);
 }
 
+static esp_err_t app_set_time_from_rtc(void)
+{
+    // Set timezone to UTC+8 for Taiwan (POSIX TZ sign is reversed)
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    bool valid = false;
+    esp_err_t err = PCF85063_is_time_valid(&valid);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "RTC validity check failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (!valid) {
+        // This is expected if no RTC battery and you removed USB power.
+        ESP_LOGW(TAG, "RTC time invalid (OSF set). System time not updated.");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    datetime_t dt;
+    err = PCF85063_read_time(&dt);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "RTC read failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    struct tm tm_local = {0};
+    tm_local.tm_year = (int)dt.year - 1900;
+    tm_local.tm_mon  = (int)dt.month - 1;
+    tm_local.tm_mday = (int)dt.day;
+    tm_local.tm_hour = (int)dt.hour;
+    tm_local.tm_min  = (int)dt.minute;
+    tm_local.tm_sec  = (int)dt.second;
+    tm_local.tm_isdst = -1;
+
+    time_t epoch = mktime(&tm_local);
+    if (epoch < 0) {
+        ESP_LOGW(TAG, "mktime() failed, not setting system time");
+        return ESP_FAIL;
+    }
+
+    struct timeval tv = {
+        .tv_sec = epoch,
+        .tv_usec = 0
+    };
+    settimeofday(&tv, NULL);
+
+    ESP_LOGI(TAG, "System time set from RTC: %04u-%02u-%02u %02u:%02u:%02u",
+             (unsigned)dt.year, (unsigned)dt.month, (unsigned)dt.day,
+             (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second);
+
+    return ESP_OK;
+}
+
+static void app_nvs_init(void)
+{
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
+}
 /* ===========================================================
  *  app_main – orchestrator
  * ===========================================================
@@ -629,6 +783,21 @@ void app_main(void)
     init_touch_and_lvgl_input();
     init_imu();
     PCF85063_init(&s_imu_bus);
+    app_nvs_init();
+
+    gps_gtu8_config_t gps_cfg = {
+        .uart_num = UART_NUM_1,
+        .tx_gpio = 43,            // board TXD
+        .rx_gpio = 44,            // board RXD
+        .baud = 9600,             // common GT-U8 default
+        .task_prio = 8,
+        .task_stack = 4096,
+        .rx_buf_size = 2048,
+    };
+    ESP_ERROR_CHECK(gps_gtu8_init(&gps_cfg));
+    ESP_ERROR_CHECK(gps_gtu8_set_callback(gps_fix_cb, NULL));
+
+    app_set_time_from_rtc();
     app_pwr_key_setup();
 
     /* Create UI in separate module */
