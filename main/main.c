@@ -1,5 +1,4 @@
 #include "freertos/FreeRTOS.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -59,6 +58,10 @@ typedef enum {
     ACT_CMD_STOP_SAVE,
 } act_cmd_t;
 
+/* =====================
+ * Globals
+ * ===================== */
+
 static sd_mmc_helper_t s_sd; 
 static QueueHandle_t s_act_q = NULL;
 static TaskHandle_t s_act_worker_task = NULL;
@@ -94,11 +97,48 @@ static bool s_auto_rotate_enabled = false;
 static int16_t s_last_touch_x = 0;
 static int16_t s_last_touch_y = 0;
 
+/* =====================
+ * Forward declarations
+ * (group static function prototypes so the implementation order is free)
+ * ===================== */
+
+static time_t mktime_utc(struct tm *t);
+static void gps_fix_cb(const gps_fix_t *fix, void *user);
+
+static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data);
+
+static void on_shutdown_confirmed(void);
+static void app_enter_sleep(void);
+static void pwr_evt_cb(pwr_key_event_t evt, void *user);
+static void app_pwr_key_setup(void);
+
+static void activity_worker_task(void *arg);
+static void on_stop_save_confirmed(void);
+
+static void activity_logger_task(void *arg);
+
+static void on_auto_rotate_setting_changed(bool enabled);
+static void on_dark_mode_setting_changed(bool enabled);
+
+static ui_orientation_t decide_orientation_from_accel(float ax, float ay, float az);
+
+static void init_imu(void);
+static void stroke_task(void *arg);
+
+static void init_display_and_lvgl(void);
+static void init_touch_and_lvgl_input(void);
+static esp_err_t app_set_time_from_rtc(void);
+static void app_nvs_init(void);
+
 /* ===========================================================
  *  GPS GT-U8 Setup
  * ===========================================================
  */
 static bool s_time_synced_from_gps = false;
+
+/* -------------------------------------------------------------------------- */
+/*  GPS / Time helpers                                                        */
+/* -------------------------------------------------------------------------- */
 
 static time_t mktime_utc(struct tm *t)
 {
@@ -163,6 +203,10 @@ static void gps_fix_cb(const gps_fix_t *fix, void *user)
  * ===========================================================
  */
 
+/* -------------------------------------------------------------------------- */
+/*  Touch input (LVGL read callback)                                           */
+/* -------------------------------------------------------------------------- */
+
 static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
@@ -203,6 +247,10 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
  */
 
 
+/* -------------------------------------------------------------------------- */
+/*  Power / Shutdown handling                                                  */
+/* -------------------------------------------------------------------------- */
+
 static void on_shutdown_confirmed(void)
 {
     // Optional: save state, flush logs, stop peripherals, etc.
@@ -226,6 +274,10 @@ static void app_enter_sleep(void)
     // Woke up
     // backlight_set(true);
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Power key event handling                                                   */
+/* -------------------------------------------------------------------------- */
 
 static void pwr_evt_cb(pwr_key_event_t evt, void *user)
 {
@@ -276,6 +328,10 @@ static void app_pwr_key_setup(void)
     // Keep power latched on
     pwr_key_set_hold(true);
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Activity worker (start/stop/save)                                          */
+/* -------------------------------------------------------------------------- */
 
 static void activity_worker_task(void *arg)
 {
@@ -343,6 +399,10 @@ static void on_stop_save_confirmed(void)
 /* -------------------------------------------------------------------------- */
 /*  Logger Tasks                                                              */
 /* -------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/*  Activity logger task                                                       */
+/* -------------------------------------------------------------------------- */
+
 static void activity_logger_task(void *arg)
 {
     (void)arg;
@@ -363,6 +423,10 @@ static void activity_logger_task(void *arg)
 /*  SETTINGS CALLBACKS (from Settings tab)                                    */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*  Settings callbacks                                                         */
+/* -------------------------------------------------------------------------- */
+
 static void on_auto_rotate_setting_changed(bool enabled)
 {
     s_auto_rotate_enabled = enabled;
@@ -379,6 +443,10 @@ static void on_dark_mode_setting_changed(bool enabled)
 
 /* -------------------------------------------------------------------------- */
 /*  IMU ORIENTATION HELPER + TASK                                             */
+/* -------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------- */
+/*  IMU / Orientation helpers                                                  */
 /* -------------------------------------------------------------------------- */
 
 static ui_orientation_t decide_orientation_from_accel(float ax, float ay, float az)
@@ -428,6 +496,10 @@ static ui_orientation_t decide_orientation_from_accel(float ax, float ay, float 
 
 /* -------------------------------------------------------------------------- */
 /*  IMU INIT + STROKE TASK                                                    */
+/* -------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------- */
+/*  IMU initialization and stroke detection task                              */
 /* -------------------------------------------------------------------------- */
 
 static void init_imu(void)
@@ -656,6 +728,10 @@ static void stroke_task(void *arg)
  * ===========================================================
  */
 
+/* -------------------------------------------------------------------------- */
+/*  Display / LVGL initialization                                              */
+/* -------------------------------------------------------------------------- */
+
 static void init_display_and_lvgl(void)
 {
     ESP_LOGI(TAG, "Init ST7789 via esp_lcd...");
@@ -691,6 +767,10 @@ static void init_display_and_lvgl(void)
     lv_disp_set_default(s_disp);
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Touch / LVGL input init                                                    */
+/* -------------------------------------------------------------------------- */
+
 static void init_touch_and_lvgl_input(void)
 {
     ESP_LOGI(TAG, "Init CST328 touch (Kconfig pins)...");
@@ -707,6 +787,10 @@ static void init_touch_and_lvgl_input(void)
     lv_indev_set_read_cb(s_indev_touch, touch_read_cb);
     lv_indev_set_display(s_indev_touch, s_disp);
 }
+
+/* -------------------------------------------------------------------------- */
+/*  RTC / Time helpers                                                         */
+/* -------------------------------------------------------------------------- */
 
 static esp_err_t app_set_time_from_rtc(void)
 {
@@ -761,6 +845,10 @@ static esp_err_t app_set_time_from_rtc(void)
 
     return ESP_OK;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  NVS / misc helpers                                                         */
+/* -------------------------------------------------------------------------- */
 
 static void app_nvs_init(void)
 {
