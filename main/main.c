@@ -187,8 +187,7 @@ static void gps_fix_cb(const gps_fix_t *fix, void *user)
             dt.minute = local_tm.tm_min;
             dt.second = local_tm.tm_sec;
 
-            PCF85063_set_date(dt);
-            PCF85063_set_time(dt);
+            PCF85063_set_all(dt);
 
             s_time_synced_from_gps = true;
         }
@@ -198,10 +197,6 @@ static void gps_fix_cb(const gps_fix_t *fix, void *user)
          fix->lat_deg, fix->lon_deg, fix->speed_mps, fix->sats, fix->hdop);
 }
 
-/* ===========================================================
- *  TOUCH → LVGL INPUT CALLBACK
- * ===========================================================
- */
 
 /* -------------------------------------------------------------------------- */
 /*  Touch input (LVGL read callback)                                           */
@@ -240,11 +235,6 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         data->point.y = s_last_touch_y;
     }
 }
-
-/* ===========================================================
- *  PWR_KEY Setup
- * ===========================================================
- */
 
 
 /* -------------------------------------------------------------------------- */
@@ -792,6 +782,25 @@ static void init_touch_and_lvgl_input(void)
 /*  RTC / Time helpers                                                         */
 /* -------------------------------------------------------------------------- */
 
+static uint8_t calc_dotw(uint16_t y, uint8_t m, uint8_t d)
+{
+    // Sakamoto: returns 0=Sunday .. 6=Saturday
+    static const uint8_t t[] = {0,3,2,5,0,3,5,1,4,6,2,4};
+    y -= (m < 3);
+    return (uint8_t)((y + y/4 - y/100 + y/400 + t[m - 1] + d) % 7);
+}
+
+static datetime_t app_default_datetime(void)
+{
+    datetime_t dt = {
+        .year = 2025, .month = 12, .day = 27,
+        .hour = 12, .minute = 0, .second = 0,
+    };
+    dt.dotw = calc_dotw(dt.year, dt.month, dt.day); // 2025-12-27 => 6 (Sat)
+    return dt;
+}
+
+
 static esp_err_t app_set_time_from_rtc(void)
 {
     // Set timezone to UTC+8 for Taiwan (POSIX TZ sign is reversed)
@@ -806,10 +815,22 @@ static esp_err_t app_set_time_from_rtc(void)
     }
 
     if (!valid) {
-        // This is expected if no RTC battery and you removed USB power.
-        ESP_LOGW(TAG, "RTC time invalid (OSF set). System time not updated.");
-        return ESP_ERR_INVALID_STATE;
+    datetime_t def = app_default_datetime();
+
+    ESP_LOGW(TAG,
+             "RTC time invalid (OSF set). Seeding RTC to default: %04u-%02u-%02u %02u:%02u:%02u",
+             (unsigned)def.year, (unsigned)def.month, (unsigned)def.day,
+             (unsigned)def.hour, (unsigned)def.minute, (unsigned)def.second);
+
+    esp_err_t se = PCF85063_set_all(def);   // writes full datetime + clears OSF
+    if (se != ESP_OK) {
+        ESP_LOGW(TAG, "RTC seed failed: %s (system time not updated)", esp_err_to_name(se));
+        return se;
     }
+
+    // Now treat as valid and continue to read RTC + set system time
+    valid = true;
+}
 
     datetime_t dt;
     err = PCF85063_read_time(&dt);
