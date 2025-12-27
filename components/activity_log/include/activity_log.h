@@ -1,77 +1,55 @@
+// components/activity_log/include/activity_log.h
 #pragma once
+
+#include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <time.h>
+#include "sd_mmc_helper.h" 
 #include "esp_err.h"
-#include "sd_mmc_helper.h"
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+// Struct for Split Data (The "Summary Row")
+typedef struct {
+    int split_index;          
+    float total_dist_m;       
+    float split_dist_m;       
+    float split_time_s;       
+    float split_pace_s;       
+    float avg_spm;            
+} activity_log_split_row_t;
 
-    // The row structure matches your 16 requested columns exactly
-    typedef struct
-    {
-        // 1. RTC/Global Time
-        time_t rtc_time;
+// Existing Stroke Row
+typedef struct {
+    time_t rtc_time;
+    float session_time_s;
+    float total_distance_m;
+    float pace_500m_s;
+    float spm_instant;
+    float avg_pace_500m_s;
+    float avg_speed_mps;
+    float stroke_length_m;
+    uint32_t stroke_count;
+    double gps_lat;
+    double gps_lon;
+    float power_w;
+    float drive_time_s;
+    float recovery_time_s;
+    float recovery_ratio;
+} activity_log_row_t;
 
-        // 2. Session Time
-        float session_time_s;
+// Main Log Handle
+typedef struct {
+    bool opened;
+    FILE *f_main;             // <--- Updated
+    FILE *f_splits;           // <--- Updated
+    char filename_base[128];   
+    uint32_t flush_every_n;   
+    uint32_t pending;         
+    char rel_path[96];        // kept for backward compat if needed
+} activity_log_t;
 
-        // 3. Distance (Total for session)
-        float total_distance_m;
-
-        // 4. Instant Pace (s/500m)
-        float pace_500m_s;
-
-        // 5. SPM (Instant)
-        float spm_instant;
-
-        // 6. Average Pace (s/500m)
-        float avg_pace_500m_s;
-
-        // 7. Session Speed Avg (m/s)
-        float avg_speed_mps;
-
-        // 8. Stroke Length (m)
-        float stroke_length_m;
-
-        // 9. Stroke Count (Total)
-        uint32_t stroke_count;
-
-        // 10. GPS Lat
-        double gps_lat;
-
-        // 11. GPS Long
-        double gps_lon;
-
-        // 12. Power (W)
-        float power_w;
-
-        // 13. Drive Time (s)
-        float drive_time_s;
-
-        // 14. Recovery Time (s)
-        float recovery_time_s;
-
-        // 15. Recovery Ratio (Recovery / Drive)
-        float recovery_ratio;
-
-    } activity_log_row_t;
-
-    typedef struct
-    {
-        bool opened;
-        FILE *fp;
-        char rel_path[96];
-        uint32_t flush_every_n;
-        uint32_t pending;
-    } activity_log_t;
-
-    esp_err_t activity_log_start(activity_log_t *log, sd_mmc_helper_t *sd, time_t start_ts, uint32_t activity_id);
-    esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row);
-    esp_err_t activity_log_stop(activity_log_t *log);
-
-#ifdef __cplusplus
-}
-#endif
+void activity_log_init(activity_log_t *log);
+esp_err_t activity_log_start(activity_log_t *log, sd_mmc_helper_t *sd, time_t start_time, uint32_t session_id);
+esp_err_t activity_log_stop(activity_log_t *log);
+esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row);
+esp_err_t activity_log_append_split(activity_log_t *log, const activity_log_split_row_t *row); // <--- New
