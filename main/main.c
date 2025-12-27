@@ -516,17 +516,32 @@ static void stroke_task(void *arg)
     const float fs_hz = 200.0f;
     const stroke_detection_cfg_t cfg = {
         .fs_hz = fs_hz,
-        .gravity_tau_s = 0.8f,
+        
+        // Gravity rejection: Slower is better for a steady hull to isolate "surge" from "tilt"
+        .gravity_tau_s = 1.0f,  // Was 0.8f
+        
+        // Axis detection: Hull acceleration is linear, so we hold the decision longer
         .axis_window_s = 4.0f,
-        .axis_hold_s = 0.5f,
-        .accel_use_fixed_axis = true,
-        .accel_fixed_axis = 2,
-        .hpf_hz = 0.2f,
-        .lpf_hz = 1.2f,
-        .min_stroke_period_s = 0.8f,
-        .max_stroke_period_s = 5.0f,
-        .thr_k = STROKE_THR_K_DEFAULT,
-        .thr_floor = STROKE_THR_FLOOR_DEFAULT,
+        .axis_hold_s = 1.0f,    // Was 0.5f - reduces switching noise
+        .accel_use_fixed_axis = true, // Keep true if you know the mounting orientation
+        .accel_fixed_axis = 2,  // Ensure this matches your physical mount (2 = Z-axis usually)
+        
+        // FILTERS (CRITICAL CHANGE):
+        // Boat surge is a slow, rhythmic "push" (approx 0.5 - 1.0 Hz).
+        // High frequencies (engine vibration, water chop) must be aggressively cut.
+        .hpf_hz = 0.1f,         // Was 0.2f. Needs to pass the very slow drive start.
+        .lpf_hz = 3.0f,         // Was 1.2f. Raised slightly to capture the sharp "catch" impact, but still filter vibration.
+        
+        // TIMING:
+        .min_stroke_period_s = 1.0f, // 60 SPM max (Rowing is usually < 40)
+        .max_stroke_period_s = 6.0f, // 10 SPM min
+        
+        // THRESHOLDS:
+        // These now apply to Acceleration (m/s^2), not Gyro (rad/s).
+        // 1.3x multiplier above noise floor.
+        // 0.35 m/s^2 floor (approx 0.035g) avoids triggering on small waves.
+        .thr_k = 1.3f,               // Was STROKE_THR_K_DEFAULT (1.0)
+        .thr_floor = 0.35f,          // Was STROKE_THR_FLOOR_DEFAULT (0.85)
     };
 
     stroke_detection_init(&s_stroke, &cfg);

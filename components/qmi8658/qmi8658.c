@@ -32,7 +32,7 @@ static const char *TAG = "qmi8658";
 #define QMI8658_CTRL5_LPF_BW_5P39_ODR 0x55
 
 // CTRL1: ADDR_AI=1, BE=1 (matches your original 0x60)
-#define QMI8658_CTRL1_DEFAULT 0x60
+#define QMI8658_CTRL1_DEFAULT 0x40
 
 // Bits / fields we care about (accel only)
 static esp_err_t qmi8658_write8(qmi8658_handle_t *imu, uint8_t reg, uint8_t val)

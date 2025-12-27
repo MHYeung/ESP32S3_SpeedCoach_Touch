@@ -4,12 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// --- MODIFIED DEFAULTS FOR HULL MOUNTING ---
 #ifndef STROKE_THR_K_DEFAULT
-#define STROKE_THR_K_DEFAULT 1.0f
+#define STROKE_THR_K_DEFAULT 1.3f 
 #endif
 
+// Floor: 0.35 m/s^2 (approx 0.035g).
 #ifndef STROKE_THR_FLOOR_DEFAULT
-#define STROKE_THR_FLOOR_DEFAULT 0.85f
+#define STROKE_THR_FLOOR_DEFAULT 0.35f 
 #endif
 
 #ifdef __cplusplus
@@ -29,57 +31,56 @@ typedef struct {
     float recovery_time_s;
     uint32_t stroke_count;
 
-    // debug/telemetry (optional but useful)
-    float a_long;        // projected dynamic accel (m/s^2)
-    float a_long_f;      // filtered version
-    float g_mag;         // gyro magnitude (rad/s)
+    // Telemetry
+    float a_long;        // Raw longitudinal acceleration
+    float a_long_f;      // Filtered surge signal (The Trigger)
+    float g_mag;         // Gyro magnitude
 } stroke_metrics_t;
 
 typedef struct {
     float fs_hz;
 
-    // gravity/tilt rejection
-    float gravity_tau_s;         // ~0.5–1.0
+    // Gravity Rejection
+    float gravity_tau_s;         // ~1.0s
 
-    // variance window for axis auto-detect
-    float axis_window_s;         // 3–5 seconds
-    float axis_hold_s;           // e.g. 0.5 seconds stable before switching
-    bool accel_use_fixed_axis;   // if true, skip auto-detect and use accel_fixed_axis
+    // Axis Auto-Detect
+    float axis_window_s;         // Window to decide X vs Y vs Z
+    
+    // --- ADDED MISSING FIELD HERE ---
+    float axis_hold_s;           // Time to hold new axis before switching (e.g., 1.0s)
+    // --------------------------------
+
+    bool accel_use_fixed_axis;   // Set TRUE if you know orientation
     int accel_fixed_axis;        // 0=x, 1=y, 2=z
 
-    // filters for a_long (simple HPF + LPF)
-    float hpf_hz;                // ~0.5
-    float lpf_hz;                // ~8–10
+    // Filters for Surge
+    float hpf_hz;                // ~0.1 Hz
+    float lpf_hz;                // ~3.0 Hz
 
-    // event detection constraints
-    float min_stroke_period_s;   // e.g. 0.4 (150 spm cap)
-    float max_stroke_period_s;   // e.g. 6.0 (10 spm floor)
+    float min_stroke_period_s;   // e.g. 1.0s
+    float max_stroke_period_s;   // e.g. 6.0s
 
-    // adaptive thresholding
-    float thr_k;                 // e.g. 1.2 (multiplier on RMS)
-    float thr_floor;             // e.g. 0.5 (m/s^2)
+    float thr_k;
+    float thr_floor;
 } stroke_detection_cfg_t;
 
-/*
- * Stroke detector state.
- * Kept as a concrete struct so it can be allocated statically (no malloc).
- * Note: The axis-variance window uses fixed 1024-sample buffers (per axis).
- */
 typedef struct stroke_detection {
     stroke_detection_cfg_t cfg;
 
     bool has_prev_t;
     float prev_t;
 
+    // Gravity Estimation
     float g_est[3];
-    int polarity; // +1 or -1, learns stroke direction
+    int polarity; 
 
+    // Axis Selection
     int win_n;
     int win_i;
     int win_count;
     int hold_n;
     int hold_count;
-    int best_axis; // 0=x 1=y 2=z
+    int best_axis; 
 
     float buf_x[1024];
     float buf_y[1024];
@@ -87,38 +88,29 @@ typedef struct stroke_detection {
     float sum[3];
     float sumsq[3];
 
+    // Acceleration Filters
     float hpf_lp_state;
     float lpf_y;
     float prev_a_f;
+    float prev2_a_f;
 
+    // Adaptive Threshold
     float rms2_ewma;
-
-    float g_rms2_ewma[3];
-    int best_g_axis; // 0=x 1=y 2=z
-    int g_hold_count;
-    float g_hpf_lp_state;
-    float g_lpf_y;
-    float prev_g_f;
-    float prev2_g_f;
     bool polarity_locked;
-    bool accel_axis_fixed;
 
+    // State Machine
+    int phase; 
     uint32_t stroke_count;
-    float t_last_stroke;
-    bool have_last_stroke;
-
-    int phase; // internal
-
+    
+    // Timing
     float t_last_catch;
-    float t_prev_catch;
     float t_last_finish;
-    bool have_catch;
-    bool have_prev_catch;
-    bool have_finish;
+    float t_last_event;
 
-    float peak_norm; // peak of (polarity * a_f) during drive
-    float t_last_event; // last accepted catch/finish (s)
+    // Peak Tracking
+    float peak_norm; 
 
+    // SPM Smoothing
     float period_hist[3];
     int period_hist_count;
     int period_hist_i;
@@ -130,8 +122,8 @@ typedef struct stroke_detection {
 void stroke_detection_init(stroke_detection_t *sd, const stroke_detection_cfg_t *cfg);
 stroke_event_t stroke_detection_update(stroke_detection_t *sd,
                                        float t_s,
-                                       float ax, float ay, float az,     // m/s^2
-                                       float gx, float gy, float gz,     // rad/s
+                                       float ax, float ay, float az,
+                                       float gx, float gy, float gz,
                                        stroke_metrics_t *out);
 
 #ifdef __cplusplus
