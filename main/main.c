@@ -30,6 +30,7 @@
 #include "ui/ui.h" // our new UI module
 #include "ui/ui_data_page.h"
 #include "math.h"
+#include "ui/ui_settings_page.h" // Required for ui_settings_register_split_length_cb
 #include <stdio.h>
 #include "ui_status_bar.h"
 
@@ -74,7 +75,6 @@ static float s_session_time_s = 0.0f;          // session timer shown on data pa
 static int64_t s_session_last_us = 0;          // for dt computation
 
 static uint32_t s_last_session_stroke_count = 0; // baseline for session delta
-
 static SemaphoreHandle_t s_activity_mutex = NULL;
 
 /* Activity Log */
@@ -409,10 +409,6 @@ static void activity_logger_task(void *arg)
 
 
 /* -------------------------------------------------------------------------- */
-/*  SETTINGS CALLBACKS (from Settings tab)                                    */
-/* -------------------------------------------------------------------------- */
-
-/* -------------------------------------------------------------------------- */
 /*  Settings callbacks                                                         */
 /* -------------------------------------------------------------------------- */
 
@@ -430,9 +426,13 @@ static void on_dark_mode_setting_changed(bool enabled)
     // ui_set_dark_mode(enabled);
 }
 
-/* -------------------------------------------------------------------------- */
-/*  IMU ORIENTATION HELPER + TASK                                             */
-/* -------------------------------------------------------------------------- */
+static void on_split_interval_changed(uint32_t length_m)
+{
+    ESP_LOGI(TAG, "UI Callback: Split Interval changed to %lu meters", length_m);
+    
+    // Update the logger configuration immediately
+    activity_log_set_split_interval(&s_act_log, length_m);
+}
 
 /* -------------------------------------------------------------------------- */
 /*  IMU / Orientation helpers                                                  */
@@ -533,7 +533,7 @@ static void stroke_task(void *arg)
         .lpf_hz = 3.0f,         // Was 1.2f. Raised slightly to capture the sharp "catch" impact, but still filter vibration.
         
         // TIMING:
-        .min_stroke_period_s = 1.0f, // 60 SPM max (Rowing is usually < 40)
+        .min_stroke_period_s = 0.8f, // 60 SPM max (Rowing is usually < 40)
         .max_stroke_period_s = 6.0f, // 10 SPM min
         
         // THRESHOLDS:
@@ -554,7 +554,7 @@ static void stroke_task(void *arg)
     int stable_count = 0;
 
     const TickType_t sample_delay = pdMS_TO_TICKS(5); // ~200 Hz
-    const TickType_t ui_period    = pdMS_TO_TICKS(100);  // 10 Hz UI updates
+    const TickType_t ui_period    = pdMS_TO_TICKS(80);  // 12.5 Hz UI updates
 
     static float s_last_valid_spm = NAN;
     static float s_last_spm_t_s = -1.0f;
@@ -963,6 +963,7 @@ void app_main(void)
     ui_register_auto_rotate_cb(on_auto_rotate_setting_changed);
     ui_register_shutdown_confirm_cb(on_shutdown_confirmed);
     ui_register_stop_save_confirm_cb(on_stop_save_confirmed);
+    ui_settings_register_split_length_cb(on_split_interval_changed);
 
     s_activity_mutex = xSemaphoreCreateMutex();
     activity_init(&s_activity, 0);
@@ -978,7 +979,7 @@ void app_main(void)
     xTaskCreate(activity_logger_task, "activity_logger", 6144, NULL, 6, NULL);
     xTaskCreate(activity_worker_task, "activity_worker", 8192, NULL, 9, &s_act_worker_task);
     xTaskCreatePinnedToCore(stroke_task, "stroke",
-                            6144, NULL, 3, NULL, 0);
+                            6144, NULL, 3, NULL, 0);                      
 
     /* app_main can idle */
     while (1)
