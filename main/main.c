@@ -345,11 +345,10 @@ static void activity_worker_task(void *arg)
             activity_start(&s_activity, time(NULL));
 
             if (s_sd.mounted) {
-                // open per-stroke CSV named by start time: YYYYMMDDHHMM_xx.csv
+                // Starts the per-stroke CSV log file on the SD card
                 activity_log_start(&s_act_log, &s_sd, s_activity.start_ts, s_activity.id);
             }
 
-            // baseline will be set by stroke_task on first cycle
             s_last_session_stroke_count = 0;
 
             if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
@@ -359,23 +358,23 @@ static void activity_worker_task(void *arg)
         }
 
         if (cmd == ACT_CMD_STOP_SAVE) {
-             s_activity_recording = false;
+            s_activity_recording = false;
+            
+            // Stop logic updates end time and averages
             activity_stop(&s_activity, time(NULL));
 
-            activity_t snapshot = s_activity; // copy for saving
+            activity_t snapshot = s_activity; 
             if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
 
             data_page_show_activity_toast(false);
-            ESP_LOGI("ACT", "STOP id=%lu", (unsigned long)snapshot.id);
+            ESP_LOGI("ACT", "STOP id=%lu Dist=%.1fm", (unsigned long)snapshot.id, (double)snapshot.distance_m);
 
+            // STOP THE LOGGER: This flushes and closes the CSV file.
+            // The file is now complete and saved on the SD card.
             activity_log_stop(&s_act_log);
 
-            if (s_sd.mounted) {
-                esp_err_t e = activity_save_to_sd(&s_sd, &snapshot, true);
-                ESP_LOGI("ACT", "Saved: %s", esp_err_to_name(e));
-            } else {
-                ESP_LOGW("ACT", "SD not mounted, not saved");
-            }
+            // REMOVED: activity_save_to_sd(...)
+            // We deleted this call because the log file created above IS the save file.
         }
     }
 }
@@ -509,7 +508,7 @@ static void stroke_task(void *arg)
 {
     (void)arg;
 
-    // GPS smoothing state (Doppler speed is usually best for distance integration)
+    // GPS smoothing state
     static float  s_gps_speed_filt = NAN;
     static double s_gps_lat = NAN;
     static double s_gps_lon = NAN;
@@ -550,42 +549,36 @@ static void stroke_task(void *arg)
         esp_err_t err = qmi8658_read_accel_gyro(&s_imu, &ax, &ay, &az, &gx, &gy, &gz);
         if (err == ESP_OK) {
 
-            // Use one timestamp per loop for consistency
             int64_t now_us = esp_timer_get_time();
-            float t_s  = (float)(now_us - t0_us) * 1e-6f;         // boot time (for algorithm)
-            float dt_s = (float)(now_us - prev_us) * 1e-6f;       // delta time
+            float t_s  = (float)(now_us - t0_us) * 1e-6f;
+            float dt_s = (float)(now_us - prev_us) * 1e-6f;
             prev_us = now_us;
             if (dt_s < 0.0f) dt_s = 0.0f;
-            if (dt_s > 0.1f) dt_s = 0.1f; // clamp in case of pauses
+            if (dt_s > 0.1f) dt_s = 0.1f;
 
-            // Stroke detection
             stroke_metrics_t m = {0};
             stroke_event_t ev = stroke_detection_update(&s_stroke, t_s, ax, ay, az, gx, gy, gz, &m);
 
-            // Optional debug
             if (ev != STROKE_EVENT_NONE) {
                 ESP_LOGI("STROKE", "ev=%d count=%lu spm=%.1f period=%.2fs",
                          (int)ev, (unsigned long)m.stroke_count, (double)m.spm, (double)m.stroke_period_s);
             }
 
-            // Orientation auto-rotate (OK to keep; consider running this at 10Hz later)
+            // Orientation Logic
             if (s_auto_rotate_enabled) {
                 ui_orientation_t candidate = decide_orientation_from_accel(ax, ay, az);
-
                 if (candidate == last_orient) {
                     if (stable_count < 20) stable_count++;
                 } else {
                     last_orient = candidate;
                     stable_count = 0;
                 }
-
                 if (stable_count >= 8 && candidate != s_current_orient) {
                     s_current_orient = candidate;
                     ui_set_orientation(candidate);
                 }
             }
 
-            // Keep last valid SPM (bounded + integer output)
             if (isfinite(m.spm) && m.spm >= 10.0f && m.spm <= 80.0f) {
                 s_last_valid_spm = m.spm;
                 s_last_spm_t_s = t_s;
@@ -595,35 +588,46 @@ static void stroke_task(void *arg)
             if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_raw = NAN;
             if (!isfinite(spm_raw)) spm_raw = 0.0f;
 
-            // ---- GPS fetch (non-blocking) ----
+            // GPS Logic
             gps_fix_t fix;
             bool gps_ok = false;
-
             if (gps_gtu8_get_latest(&fix)) {
                 int64_t age_us = esp_timer_get_time() - fix.rx_time_us;
-
-                // accept only "fresh" fixes
                 if (fix.valid_fix && isfinite(fix.speed_mps) && age_us < 2000000) {
                     gps_ok = true;
                     s_gps_lat = fix.lat_deg;
                     s_gps_lon = fix.lon_deg;
 
-                    // 1st-order low-pass on speed
-                    const float tau = 1.0f;                    // 1s time constant (tune)
+                    const float tau = 1.0f;
                     float alpha = dt_s / (tau + dt_s);
-
                     if (!isfinite(s_gps_speed_filt)) s_gps_speed_filt = fix.speed_mps;
                     else s_gps_speed_filt += alpha * (fix.speed_mps - s_gps_speed_filt);
                 }
             }
 
             float speed_mps = gps_ok ? s_gps_speed_filt : 0.0f;
-
-            // integrate distance continuously while recording
             float dist_delta_m = speed_mps * dt_s;
 
-            activity_log_row_t row;
+            // --- 1. Calculate Derived Metrics for Logging ---
+            
+            // Instant Pace (s/500m)
+            float instant_pace_s = (speed_mps > 0.1f) ? (500.0f / speed_mps) : 0.0f;
+
+            // Stroke Length (m) = Speed * Period
+            float stroke_len_m = 0.0f;
+            if (isfinite(m.stroke_period_s) && m.stroke_period_s > 0.0f) {
+                stroke_len_m = speed_mps * m.stroke_period_s;
+            }
+
+            // Recovery Ratio = Recovery / Drive
+            float recov_ratio = 0.0f;
+            if (m.drive_time_s > 0.01f) {
+                recov_ratio = m.recovery_time_s / m.drive_time_s;
+            }
+            // --- End Derived Metrics ---
+
             bool need_log = false;
+            activity_log_row_t row = {0}; 
 
             if (s_activity_mutex) xSemaphoreTake(s_activity_mutex, portMAX_DELAY);
 
@@ -632,68 +636,78 @@ static void stroke_task(void *arg)
 
                 uint32_t stroke_delta = (ev == STROKE_EVENT_CATCH) ? 1 : 0;
 
+                // Update Session Model (Activity.c)
                 activity_update(&s_activity,
                                 dt_s,
-                                speed_mps,      // speed_mps (GPS later)
-                                spm_raw,    // RAW for saving/stats
-                                0.0f,      // power_w
-                                dist_delta_m,      // dist_delta_m
+                                speed_mps,
+                                spm_raw,
+                                0.0f, // Power placeholder
+                                dist_delta_m,
                                 stroke_delta);
 
-                // Only log on stroke event (CATCH)
+                // Calculate Avg Pace from Session Avg Speed
+                float avg_pace_s = (s_activity.avg_speed_mps > 0.1f) ? (500.0f / s_activity.avg_speed_mps) : 0.0f;
+
+                // Only log on CATCH
                 if (ev == STROKE_EVENT_CATCH) {
-                    row.epoch_ts = time(NULL);                  // replace with RTC epoch if you want
+                    
+                    // --- Populate the 16-Column Row ---
+                    
+                    // 1. RTC Time
+                    row.rtc_time = time(NULL); 
+                    // 2. Session Time
                     row.session_time_s = s_session_time_s;
-                    row.session_stroke_idx = s_activity.stroke_count; // session count after update
-                    row.spm_raw = spm_raw;
-                    row.stroke_period_s = m.stroke_period_s;
-                    row.speed_mps = speed_mps;
-                    row.distance_m = s_activity.distance_m;
-                    row.lat_deg = gps_ok ? s_gps_lat : NAN;
-                    row.lon_deg = gps_ok ? s_gps_lon : NAN;
+                    // 3. Distance (Total)
+                    row.total_distance_m = s_activity.distance_m;
+                    // 4. Instant Pace
+                    row.pace_500m_s = instant_pace_s;
+                    // 5. SPM Instant
+                    row.spm_instant = spm_raw;
+                    // 6. Avg Pace
+                    row.avg_pace_500m_s = avg_pace_s;
+                    // 7. Avg Speed
+                    row.avg_speed_mps = s_activity.avg_speed_mps;
+                    // 8. Stroke Length
+                    row.stroke_length_m = stroke_len_m;
+                    // 9. Stroke Count
+                    row.stroke_count = s_activity.stroke_count;
+                    // 10. GPS Lat
+                    row.gps_lat = gps_ok ? s_gps_lat : 0.0;
+                    // 11. GPS Long
+                    row.gps_lon = gps_ok ? s_gps_lon : 0.0;
+                    // 12. Power
+                    row.power_w = 0.0f; 
+                    // 13. Drive Time
                     row.drive_time_s = m.drive_time_s;
+                    // 14. Recovery Time
                     row.recovery_time_s = m.recovery_time_s;
+                    // 15. Recovery Ratio
+                    row.recovery_ratio = recov_ratio;
+
                     need_log = true;
                 }
             } else {
-                // not recording (your chosen behavior)
                 s_session_time_s = 0.0f;
             }
 
             if (s_activity_mutex) xSemaphoreGive(s_activity_mutex);
 
-            // Enqueue OUTSIDE the mutex (fast, non-blocking)
             if (need_log && s_log_q) {
-                xQueueSend(s_log_q, &row, 0); // drop if queue full
+                xQueueSend(s_log_q, &row, 0); 
             }
-            // ---- End activity logic ----
 
-            // ---- UI update at 10Hz ----
+            // UI Update
             TickType_t now = xTaskGetTickCount();
             if ((now - last_ui_tick) >= ui_period)
             {
                 last_ui_tick = now;
+                float spm_raw_ui = s_last_valid_spm;
+                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) spm_raw_ui = NAN;
 
-                float spm_raw = s_last_valid_spm;
-                if (s_last_spm_t_s > 0.0f && (t_s - s_last_spm_t_s) > 12.0f) {
-                    spm_raw = NAN;
-                }
-
-                // Display value: snap to 0.5 increments (choose ONE rounding behavior)
-                float spm_disp = spm_raw;
-                if (isfinite(spm_disp)) {
-                    // Nearest 0.5 step:
-                    //spm_disp = roundf(spm_disp * 2.0f) / 2.0f;
-
-                    // If you want CEIL to next 0.5 (what you currently have):
-                    spm_disp = ceilf(spm_disp * 2.0f) / 2.0f;
-
-                    // If you want FLOOR to lower 0.5:
-                    // spm_disp = floorf(spm_disp * 2.0f) / 2.0f;
-                }
+                float spm_disp = spm_raw_ui;
+                if (isfinite(spm_disp)) spm_disp = ceilf(spm_disp * 2.0f) / 2.0f;
 
                 bool recording = s_activity_recording;
-
                 float pace = (speed_mps > 0.2f) ? (500.0f / speed_mps) : NAN;
 
                 data_values_t v = {
@@ -708,7 +722,6 @@ static void stroke_task(void *arg)
                 data_page_set_values(&v);
             }
         }
-
         vTaskDelay(sample_delay);
     }
 }

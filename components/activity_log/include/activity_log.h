@@ -1,59 +1,76 @@
 #pragma once
-#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 #include "esp_err.h"
 #include "sd_mmc_helper.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef struct {
-    // time
-    time_t   epoch_ts;          // RTC/system epoch at stroke time
-    float    session_time_s;    // time since activity start (your session timer)
+    // The row structure matches your 16 requested columns exactly
+    typedef struct
+    {
+        // 1. RTC/Global Time
+        time_t rtc_time;
 
-    // stroke
-    uint32_t session_stroke_idx;  // 1..N within session
-    float    spm_raw;             // full precision (for saving)
-    float    stroke_period_s;     // period between strokes (if available)
+        // 2. Session Time
+        float session_time_s;
 
-    //GPS related data
-    float  speed_mps;
-    float  distance_m;  
-    double lat_deg;
-    double lon_deg;
+        // 3. Distance (Total for session)
+        float total_distance_m;
 
-    //Drive to Recovery Ratio Calculation
-    float drive_time_s;
-    float recovery_time_s;
+        // 4. Instant Pace (s/500m)
+        float pace_500m_s;
 
-    
-} activity_log_row_t;
+        // 5. SPM (Instant)
+        float spm_instant;
 
-typedef struct {
-    bool  opened;
-    FILE *fp;
-    char  rel_path[96];     // e.g. "activities/202512251051_01.csv"
-    uint32_t flush_every_n; // flush after N rows
-    uint32_t pending;
-} activity_log_t;
+        // 6. Average Pace (s/500m)
+        float avg_pace_500m_s;
 
-/**
- * Open per-stroke CSV file and write header.
- * File name uses start time: YYYYMMDDHHMM_xx.csv  (xx = id % 100)
- */
-esp_err_t activity_log_start(activity_log_t *log,
-                            sd_mmc_helper_t *sd,
-                            time_t start_ts,
-                            uint32_t activity_id);
+        // 7. Session Speed Avg (m/s)
+        float avg_speed_mps;
 
-/** Append one per-stroke row (call from logger task only). */
-esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row);
+        // 8. Stroke Length (m)
+        float stroke_length_m;
 
-/** Close file (flush). Safe to call even if not opened. */
-esp_err_t activity_log_stop(activity_log_t *log);
+        // 9. Stroke Count (Total)
+        uint32_t stroke_count;
+
+        // 10. GPS Lat
+        double gps_lat;
+
+        // 11. GPS Long
+        double gps_lon;
+
+        // 12. Power (W)
+        float power_w;
+
+        // 13. Drive Time (s)
+        float drive_time_s;
+
+        // 14. Recovery Time (s)
+        float recovery_time_s;
+
+        // 15. Recovery Ratio (Recovery / Drive)
+        float recovery_ratio;
+
+    } activity_log_row_t;
+
+    typedef struct
+    {
+        bool opened;
+        FILE *fp;
+        char rel_path[96];
+        uint32_t flush_every_n;
+        uint32_t pending;
+    } activity_log_t;
+
+    esp_err_t activity_log_start(activity_log_t *log, sd_mmc_helper_t *sd, time_t start_ts, uint32_t activity_id);
+    esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row);
+    esp_err_t activity_log_stop(activity_log_t *log);
 
 #ifdef __cplusplus
 }
