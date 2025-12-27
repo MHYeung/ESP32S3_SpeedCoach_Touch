@@ -4,7 +4,6 @@
 #include "esp_err.h"
 #include "esp_sleep.h"
 #include "driver/uart.h"
-#include "nvs_flash.h"
 
 #include "lcd_st7789.h"
 #include "touch_cst328.h"
@@ -22,6 +21,7 @@
 #include "activity.h"
 #include "activity_log.h"
 #include "gps_gtu8.h"
+#include "nvs_helper.h"
 
 #include <sys/time.h>
 #include <time.h>
@@ -128,7 +128,6 @@ static void stroke_task(void *arg);
 static void init_display_and_lvgl(void);
 static void init_touch_and_lvgl_input(void);
 static esp_err_t app_set_time_from_rtc(void);
-static void app_nvs_init(void);
 
 /* ===========================================================
  *  GPS GT-U8 Setup
@@ -899,16 +898,16 @@ static esp_err_t app_set_time_from_rtc(void)
 /*  NVS / misc helpers                                                         */
 /* -------------------------------------------------------------------------- */
 
-static void app_nvs_init(void)
-{
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ESP_ERROR_CHECK(nvs_flash_init());
-    } else {
-        ESP_ERROR_CHECK(err);
-    }
-}
+// static void app_nvs_init(void)
+// {
+//     esp_err_t err = nvs_flash_init();
+//     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+//         ESP_ERROR_CHECK(nvs_flash_erase());
+//         ESP_ERROR_CHECK(nvs_flash_init());
+//     } else {
+//         ESP_ERROR_CHECK(err);
+//     }
+// }
 /* ===========================================================
  *  app_main – orchestrator
  * ===========================================================
@@ -920,8 +919,9 @@ void app_main(void)
     init_touch_and_lvgl_input();
     init_imu();
     PCF85063_init(&s_imu_bus);
-    app_nvs_init();
+    ESP_ERROR_CHECK(nvs_helper_init()); 
 
+    
     gps_gtu8_config_t gps_cfg = {
         .uart_num = UART_NUM_1,
         .tx_gpio = 43,            // board TXD
@@ -939,7 +939,6 @@ void app_main(void)
 
     /* Create UI in separate module */
     ui_init(s_disp);
-    ui_set_orientation(s_current_orient);
 
     /* Default Data page metrics for rowing */
     const data_metric_t metrics[3] = {
@@ -958,6 +957,16 @@ void app_main(void)
     {
         ESP_LOGW(TAG, "SD mount failed: %s (continuing)", esp_err_to_name(sd_err));
     }
+
+    bool saved_dark = nvs_helper_get_dark_mode(); 
+    ui_set_dark_mode(saved_dark);
+    bool auto_rot = nvs_helper_get_auto_rotate();
+    uint8_t saved_val = nvs_helper_get_orientation(); 
+    ui_set_orientation((ui_orientation_t)saved_val);
+    uint32_t saved_split = nvs_helper_get_split_len();
+    activity_log_init(&s_act_log); // Ensure log is init'd before setting interval
+    activity_log_set_split_interval(&s_act_log, saved_split);
+
 
     ui_register_dark_mode_cb(on_dark_mode_setting_changed);
     ui_register_auto_rotate_cb(on_auto_rotate_setting_changed);

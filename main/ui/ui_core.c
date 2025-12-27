@@ -539,6 +539,5 @@ void ui_init(lv_disp_t *disp)
     lvgl_port_lock(0);
     ui_theme_init(s_disp);
     create_pages_ui();
-    ui_set_dark_mode(s_dark_mode);
     lvgl_port_unlock();
 }

@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include "nvs_helper.h"
+#include "esp_log.h"
 
 /* -------------------------------------------------------------------------- */
 /* State & Handles                                                            */
@@ -132,6 +134,8 @@ static void split_dialog_event_cb(lv_event_t *e)
         if (idx < 6) { 
             s_current_split_m = SPLIT_OPTIONS_M[idx];
             update_split_label_text();
+
+            nvs_helper_set_split_len(s_current_split_m);
             // Notify Backend
             if (s_split_cb) s_split_cb(s_current_split_m);
         }
@@ -216,14 +220,47 @@ static void split_row_click_cb(lv_event_t *e) { create_split_dialog(); }
 /* Callbacks                                                                  */
 /* -------------------------------------------------------------------------- */
 
-static void sw_dark_mode_event_cb(lv_event_t *e) {
+static void sw_dark_mode_event_cb(lv_event_t *e)
+{
     lv_obj_t *sw = lv_event_get_target_obj(e);
-    ui_notify_dark_mode_changed(lv_obj_has_state(sw, LV_STATE_CHECKED));
+    bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    
+    // 1. Update UI Visuals
+    ui_notify_dark_mode_changed(on);
+
+    // 2. Save to NVS
+    nvs_helper_set_dark_mode(on); // <--- Add Save Call
 }
 
-static void sw_auto_rotate_event_cb(lv_event_t *e) {
+static void sw_auto_rotate_event_cb(lv_event_t *e)
+{
     lv_obj_t *sw = lv_event_get_target_obj(e);
-    ui_notify_auto_rotate_changed(lv_obj_has_state(sw, LV_STATE_CHECKED));
+    bool auto_rot_on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+
+    // 1. Update UI & NVS for the Toggle
+    ui_notify_auto_rotate_changed(auto_rot_on);
+    nvs_helper_set_auto_rotate(auto_rot_on);
+
+    // 2. IF LOCKING (Turning OFF) -> Save Current Orientation
+    if (!auto_rot_on) {
+        // Get current system rotation
+        lv_display_rotation_t current_rot = lv_display_get_rotation(NULL); // NULL = default display
+        
+        // Map LVGL rotation -> Your Custom Enum
+        ui_orientation_t save_orient = UI_ORIENT_PORTRAIT_0; // Default
+        
+        switch (current_rot) {
+            case LV_DISPLAY_ROTATION_0:   save_orient = UI_ORIENT_PORTRAIT_0; break;
+            case LV_DISPLAY_ROTATION_90:  save_orient = UI_ORIENT_LANDSCAPE_90; break;
+            case LV_DISPLAY_ROTATION_180: save_orient = UI_ORIENT_PORTRAIT_180; break;
+            case LV_DISPLAY_ROTATION_270: save_orient = UI_ORIENT_LANDSCAPE_270; break;
+        }
+
+        ESP_LOGI("UI", "Locking Orientation: %d", save_orient);
+        
+        // Save as uint8_t
+        nvs_helper_set_orientation((uint8_t)save_orient); //
+    }
 }
 
 static void settings_header_swipe_cb(lv_event_t *e) {} // Hook for gestures
@@ -234,6 +271,10 @@ static void settings_header_swipe_cb(lv_event_t *e) {} // Hook for gestures
 
 void settings_page_create(lv_obj_t *parent)
 {
+    bool is_dark = nvs_helper_get_dark_mode();      
+    bool is_rot  = nvs_helper_get_auto_rotate();    
+    s_current_split_m = nvs_helper_get_split_len(); 
+
     s_root = lv_obj_create(parent);
     lv_obj_set_size(s_root, lv_pct(100), lv_pct(100));
     lv_obj_set_flex_flow(s_root, LV_FLEX_FLOW_COLUMN);
@@ -258,13 +299,15 @@ void settings_page_create(lv_obj_t *parent)
     lv_obj_set_style_border_width(s_body, 0, 0);
     lv_obj_add_flag(s_body, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* 3. Rows */
-    s_dark_mode_sw = create_settings_row(s_body, "Dark Mode", sw_dark_mode_event_cb, ui_get_dark_mode());
-    create_settings_row(s_body, "Auto Rotate", sw_auto_rotate_event_cb, true);
+    // Dark Mode Switch (Pass 'is_dark')
+    s_dark_mode_sw = create_settings_row(s_body, "Dark Mode", sw_dark_mode_event_cb, is_dark);
     
-    // NEW: Split Selector Row
+    // Auto Rotate Switch (Pass 'is_rot')
+    create_settings_row(s_body, "Auto Rotate", sw_auto_rotate_event_cb, is_rot);
+    
+    // Split Length Row
     s_split_val_lbl = create_clickable_row(s_body, "Split Length", split_row_click_cb);
-    update_split_label_text();
+    update_split_label_text(); 
 
     s_device_lbl = create_value_row(s_body, "Device", "ESP32S3-BLE");
 }

@@ -24,5 +24,5 @@ idf_component_register(
         activity
         activity_log
         gps_gtu8
-        nvs_flash
+        nvs_helper
 )
