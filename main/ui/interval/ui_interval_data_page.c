@@ -62,15 +62,25 @@ static void complete_overlay_event_cb(lv_event_t *e)
     }
 }
 
+static const char *unit_suffix(interval_unit_t u)
+{
+    if (u == INTERVAL_UNIT_DISTANCE) {
+        return "m";
+    }
+    if (u == INTERVAL_UNIT_STROKES) {
+        return "st";
+    }
+    return NULL;
+}
+
 static void fmt_val(char *out, size_t n, interval_unit_t u, uint32_t v)
 {
     if (u == INTERVAL_UNIT_TIME) {
         uint32_t mm = v / 60;
         uint32_t ss = v % 60;
         snprintf(out, n, "%lu:%02lu", (unsigned long)mm, (unsigned long)ss);
-    } else if (u == INTERVAL_UNIT_DISTANCE) {
-        snprintf(out, n, "%lum", (unsigned long)v);
     } else {
+        /* Unit stays on the caption. The number font has no letters. */
         snprintf(out, n, "%lu", (unsigned long)v);
     }
 }
@@ -90,8 +100,9 @@ static void fmt_target(char *out, size_t n, interval_unit_t u, uint32_t v)
 
 static void style_box(lv_obj_t *box)
 {
-    ui_theme_apply_surface_border(box);
-    lv_obj_set_style_radius(box, 0, 0);
+    ui_theme_apply_surface(box);
+    lv_obj_set_style_radius(box, 8, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(box, LV_DIR_NONE);
 }
@@ -250,9 +261,15 @@ void interval_data_page_apply_snapshot(const coach_ui_snapshot_t *snap)
         (snap->interval_phase == INTERVAL_PHASE_DONE) ? "DONE" : "IDLE";
     if (s_live_rem_title) {
         char title[24];
-        if (snap->rounds) {
+        const char *unit = unit_suffix(snap->interval_unit);
+        if (snap->rounds && unit) {
+            snprintf(title, sizeof(title), "%s %u/%u  %s", ph,
+                     (unsigned)snap->round_idx, (unsigned)snap->rounds, unit);
+        } else if (snap->rounds) {
             snprintf(title, sizeof(title), "%s %u/%u", ph,
                      (unsigned)snap->round_idx, (unsigned)snap->rounds);
+        } else if (unit) {
+            snprintf(title, sizeof(title), "%s  %s", ph, unit);
         } else {
             snprintf(title, sizeof(title), "%s", ph);
         }
@@ -494,16 +511,16 @@ static void complete_prompt_show_async(void *p)
 
         s_complete_panel = lv_obj_create(s_complete_overlay);
         lv_obj_set_size(s_complete_panel, 180, 70);
-        lv_obj_set_style_bg_opa(s_complete_panel, LV_OPA_60, 0);
-        lv_obj_set_style_bg_color(s_complete_panel, lv_palette_main(LV_PALETTE_BLUE), 0);
+        lv_obj_set_style_bg_opa(s_complete_panel, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(s_complete_panel, ui_theme_color_accent(), 0);
         lv_obj_set_style_border_width(s_complete_panel, 0, 0);
         lv_obj_set_style_radius(s_complete_panel, 6, 0);
         lv_obj_center(s_complete_panel);
         lv_obj_clear_flag(s_complete_panel, LV_OBJ_FLAG_SCROLLABLE);
 
         s_complete_lbl = lv_label_create(s_complete_panel);
-        ui_theme_apply_label(s_complete_lbl, false);
         lv_label_set_text(s_complete_lbl, "Interval complete");
+        lv_obj_set_style_text_color(s_complete_lbl, ui_theme_palette()->accent_text, 0);
         lv_obj_center(s_complete_lbl);
     }
     s_complete_hide_at_ms = lv_tick_get() + 5000;

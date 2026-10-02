@@ -3,6 +3,7 @@
 #include "ui.h"
 #include "ui_status_bar.h"
 #include "ui_theme.h"
+#include "ui_typography.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -59,50 +60,75 @@ static void update_split_label_text(void)
     lv_label_set_text(s_split_val_lbl, buf);
 }
 
-static lv_obj_t *create_clickable_row(lv_obj_t *parent, const char *label_txt, lv_event_cb_t click_cb)
+static void group_row_chrome(lv_obj_t *row, bool divider)
+{
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_radius(row, 0, 0);
+    lv_obj_set_style_pad_hor(row, 10, 0);
+    lv_obj_set_style_pad_ver(row, 0, 0);
+    lv_obj_set_style_border_width(row, divider ? 1 : 0, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(row, ui_theme_palette()->border, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+static lv_obj_t *section_group(lv_obj_t *parent, const char *caption)
+{
+    lv_obj_t *cap = lv_label_create(parent);
+    lv_label_set_text(cap, caption);
+    ui_theme_apply_label(cap, true);
+    lv_obj_set_style_text_font(cap, ui_font_caption(), 0);
+    lv_obj_set_style_pad_left(cap, 4, 0);
+    lv_obj_set_style_pad_top(cap, 8, 0);
+
+    lv_obj_t *group = lv_obj_create(parent);
+    ui_theme_apply_list_group(group);
+    return group;
+}
+
+static lv_obj_t *create_clickable_row(lv_obj_t *parent, const char *label_txt, lv_event_cb_t click_cb, bool divider)
 {
     lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_width(row, lv_pct(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_height(row, 40);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(row, 12, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    ui_theme_apply_surface(row);
+    group_row_chrome(row, divider);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, click_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, label_txt);
     ui_theme_apply_label(lbl, false);
+    lv_obj_set_style_text_font(lbl, ui_font_caption(), 0);
     lv_obj_set_flex_grow(lbl, 1);
 
     lv_obj_t *val = lv_label_create(row);
     ui_theme_apply_label(val, true);
+    lv_obj_set_style_text_font(val, ui_font_caption(), 0);
     lv_label_set_text(val, "");
 
     lv_obj_t *icon = lv_label_create(row);
     lv_label_set_text(icon, LV_SYMBOL_RIGHT);
-    ui_theme_apply_label(icon, true);
-    lv_obj_set_style_pad_left(icon, 5, 0);
+    lv_obj_set_style_text_color(icon, ui_theme_color_accent(), 0);
+    lv_obj_set_style_pad_left(icon, 4, 0);
 
     return val;
 }
 
-static lv_obj_t *create_settings_row(lv_obj_t *parent, const char *label_txt, lv_event_cb_t switch_event_cb, bool initial_state)
+static lv_obj_t *create_settings_row(lv_obj_t *parent, const char *label_txt, lv_event_cb_t switch_event_cb,
+                                    bool initial_state, bool divider)
 {
     lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_width(row, lv_pct(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_height(row, 40);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    ui_theme_apply_surface(row);
+    group_row_chrome(row, divider);
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, label_txt);
     ui_theme_apply_label(lbl, false);
+    lv_obj_set_style_text_font(lbl, ui_font_caption(), 0);
     lv_obj_set_flex_grow(lbl, 1);
 
     lv_obj_t *sw = lv_switch_create(row);
@@ -113,25 +139,24 @@ static lv_obj_t *create_settings_row(lv_obj_t *parent, const char *label_txt, lv
     return sw;
 }
 
-static lv_obj_t *create_value_row(lv_obj_t *parent, const char *label_txt, const char *value_txt)
+static lv_obj_t *create_value_row(lv_obj_t *parent, const char *label_txt, const char *value_txt, bool divider)
 {
     lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_width(row, lv_pct(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_height(row, 40);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    ui_theme_apply_surface(row);
+    group_row_chrome(row, divider);
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, label_txt);
     ui_theme_apply_label(lbl, false);
+    lv_obj_set_style_text_font(lbl, ui_font_caption(), 0);
     lv_obj_set_flex_grow(lbl, 1);
 
     lv_obj_t *val = lv_label_create(row);
     lv_label_set_text(val, value_txt ? value_txt : "");
     ui_theme_apply_label(val, true);
+    lv_obj_set_style_text_font(val, ui_font_caption(), 0);
     return val;
 }
 
@@ -272,27 +297,19 @@ static void update_sensors_label(void)
 {
     if (!s_sensors_val_lbl)
         return;
-    sensor_hub_device_t peer;
-    switch (sensor_hub_get_state()) {
-    case SENSOR_HUB_DISABLED:
+    if (!sensor_hub_available()) {
         lv_label_set_text(s_sensors_val_lbl, "Off");
-        break;
-    case SENSOR_HUB_SCANNING:
-        lv_label_set_text(s_sensors_val_lbl, "Scanning");
-        break;
-    case SENSOR_HUB_CONNECTING:
-        lv_label_set_text(s_sensors_val_lbl, "Connecting");
-        break;
-    case SENSOR_HUB_CONNECTED:
-        if (sensor_hub_get_peer(&peer) && peer.name[0])
-            lv_label_set_text(s_sensors_val_lbl, peer.name);
-        else
-            lv_label_set_text(s_sensors_val_lbl, "Connected");
-        break;
-    default:
-        lv_label_set_text(s_sensors_val_lbl, "Idle");
-        break;
+        return;
     }
+    sensor_hub_slot_info_t hr;
+    sensor_hub_slot_info_t pod;
+    sensor_hub_get_slot(SENSOR_KIND_HR, &hr);
+    sensor_hub_get_slot(SENSOR_KIND_ROWPOD, &pod);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "HR %s / Pod %s",
+             hr.state == SENSOR_HUB_CONNECTED ? "On" : "Off",
+             pod.state == SENSOR_HUB_CONNECTED ? "On" : "Off");
+    lv_label_set_text(s_sensors_val_lbl, buf);
 }
 
 static void sensors_row_click_cb(lv_event_t *e)
@@ -311,11 +328,8 @@ static void sw_dark_mode_event_cb(lv_event_t *e)
     lv_obj_t *sw = lv_event_get_target_obj(e);
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
 
-    // 1. Update UI Visuals
     ui_notify_dark_mode_changed(on);
-
-    // 2. Save to NVS
-    nvs_helper_set_dark_mode(on); // <--- Add Save Call
+    nvs_helper_set_dark_mode(on);
 }
 
 static void usb_status_set(const char *msg)
@@ -363,7 +377,12 @@ static void usb_drive_row_click_cb(lv_event_t *e)
     if (ret != ESP_OK)
     {
         usb_switch_show(!want_on);
-        usb_status_set(ret == ESP_ERR_INVALID_STATE ? "Busy, try again" : "Request failed");
+        if (ret == ESP_ERR_NO_MEM)
+            usb_status_set("Not enough RAM to start USB");
+        else if (ret == ESP_ERR_INVALID_STATE)
+            usb_status_set("Busy, try again");
+        else
+            usb_status_set("Request failed");
         ESP_LOGE("UI", "USB MSC request failed: %s", esp_err_to_name(ret));
     }
 }
@@ -452,51 +471,35 @@ void settings_page_create(lv_obj_t *parent)
     lv_obj_set_style_border_width(s_root, 0, 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_TRANSP, 0);
 
-    /* 1. Status Bar */
     ui_status_bar_create(&s_status, s_root);
-    lv_obj_t *header = ui_status_bar_root(&s_status);
+    ui_status_bar_set_title(&s_status, "Settings", UI_PAGE_MENU);
     settings_page_set_gps_status(false, 0);
 
-    /* 2. Body */
     s_body = lv_obj_create(s_root);
     lv_obj_set_width(s_body, lv_pct(100));
     lv_obj_set_flex_grow(s_body, 1);
     lv_obj_set_flex_flow(s_body, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_body, 10, 0);
-    lv_obj_set_style_pad_row(s_body, 10, 0);
+    lv_obj_set_style_pad_all(s_body, 8, 0);
+    lv_obj_set_style_pad_row(s_body, 2, 0);
+    lv_obj_set_style_pad_bottom(s_body, 28, 0);
     lv_obj_set_style_bg_opa(s_body, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_body, 0, 0);
     lv_obj_add_flag(s_body, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Date (read-only, shown at top)
-    s_datetime_lbl = create_value_row(s_body, "Date", "");
-    update_datetime_label_text();
-    if (s_datetime_timer)
     {
-        lv_timer_del(s_datetime_timer);
-        s_datetime_timer = NULL;
-    }
-    s_datetime_timer = lv_timer_create(datetime_timer_cb, 60000, NULL);
+        lv_obj_t *display = section_group(s_body, "Display");
+        s_dark_mode_sw = create_settings_row(display, "Dark mode", sw_dark_mode_event_cb, is_dark, true);
+        create_settings_row(display, "Auto rotate", sw_auto_rotate_event_cb, is_rot, true);
+        create_settings_row(display, "Auto-dim", sw_auto_dim_event_cb, nvs_helper_get_auto_dim(), true);
 
-    // Dark Mode Switch (Pass 'is_dark')
-    s_dark_mode_sw = create_settings_row(s_body, "Dark Mode", sw_dark_mode_event_cb, is_dark);
+        lv_obj_t *bright = lv_obj_create(display);
+        lv_obj_set_height(bright, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(bright, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(bright, 2, 0);
+        group_row_chrome(bright, false);
+        lv_obj_set_style_pad_ver(bright, 8, 0);
 
-    // Auto Rotate Switch (Pass 'is_rot')
-    create_settings_row(s_body, "Auto Rotate", sw_auto_rotate_event_cb, is_rot);
-
-    create_settings_row(s_body, "Auto-dim screen", sw_auto_dim_event_cb, nvs_helper_get_auto_dim());
-    create_settings_row(s_body, "Lock metrics on start", sw_metrics_lock_event_cb, nvs_helper_get_metrics_lock());
-
-    {
-        lv_obj_t *row = lv_obj_create(s_body);
-        lv_obj_set_width(row, lv_pct(100));
-        lv_obj_set_height(row, LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_all(row, 8, 0);
-        lv_obj_set_style_border_width(row, 0, 0);
-        ui_theme_apply_surface(row);
-
-        lv_obj_t *hdr = lv_obj_create(row);
+        lv_obj_t *hdr = lv_obj_create(bright);
         lv_obj_remove_style_all(hdr);
         lv_obj_set_width(hdr, lv_pct(100));
         lv_obj_set_height(hdr, LV_SIZE_CONTENT);
@@ -506,35 +509,44 @@ void settings_page_create(lv_obj_t *parent)
         lv_obj_t *lbl = lv_label_create(hdr);
         lv_label_set_text(lbl, "Brightness");
         ui_theme_apply_label(lbl, false);
+        lv_obj_set_style_text_font(lbl, ui_font_caption(), 0);
 
         s_bright_lbl = lv_label_create(hdr);
         ui_theme_apply_label(s_bright_lbl, true);
+        lv_obj_set_style_text_font(s_bright_lbl, ui_font_caption(), 0);
         lv_label_set_text_fmt(s_bright_lbl, "%d%%", (int)nvs_helper_get_brightness());
 
-        lv_obj_t *sl = lv_slider_create(row);
+        lv_obj_t *sl = lv_slider_create(bright);
         lv_obj_set_width(sl, lv_pct(100));
         lv_slider_set_range(sl, 10, 100);
         lv_slider_set_value(sl, nvs_helper_get_brightness(), LV_ANIM_OFF);
         lv_obj_add_event_cb(sl, brightness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
 
-    // USB Drive Mode - whole row clickable so tap anywhere toggles (avoids small switch hit area)
     {
-        lv_obj_t *row = lv_obj_create(s_body);
-        lv_obj_set_width(row, lv_pct(100));
-        lv_obj_set_height(row, LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_all(row, 8, 0);
-        lv_obj_set_style_pad_row(row, 2, 0);
-        lv_obj_set_style_border_width(row, 0, 0);
-        ui_theme_apply_surface(row);
-        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(row, usb_drive_row_click_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *session = section_group(s_body, "Session");
+        create_settings_row(session, "Lock metrics", sw_metrics_lock_event_cb, nvs_helper_get_metrics_lock(), true);
+        s_split_val_lbl = create_clickable_row(session, "Split length", split_row_click_cb, false);
+        update_split_label_text();
+    }
 
-        lv_obj_t *hdr = lv_obj_create(row);
+    {
+        lv_obj_t *links = section_group(s_body, "Connections");
+        s_sensors_val_lbl = create_clickable_row(links, "Sensors", sensors_row_click_cb, true);
+
+        lv_obj_t *usb = lv_obj_create(links);
+        lv_obj_set_height(usb, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(usb, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(usb, 2, 0);
+        group_row_chrome(usb, false);
+        lv_obj_set_style_pad_ver(usb, 6, 0);
+        lv_obj_add_flag(usb, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(usb, usb_drive_row_click_cb, LV_EVENT_CLICKED, NULL);
+
+        lv_obj_t *hdr = lv_obj_create(usb);
         lv_obj_remove_style_all(hdr);
         lv_obj_set_width(hdr, lv_pct(100));
-        lv_obj_set_height(hdr, LV_SIZE_CONTENT);
+        lv_obj_set_height(hdr, 28);
         lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
@@ -542,25 +554,31 @@ void settings_page_create(lv_obj_t *parent)
         lv_obj_t *lbl = lv_label_create(hdr);
         lv_label_set_text(lbl, "Export via USB");
         ui_theme_apply_label(lbl, false);
+        lv_obj_set_style_text_font(lbl, ui_font_caption(), 0);
         lv_obj_set_flex_grow(lbl, 1);
 
         s_usb_drive_sw = lv_switch_create(hdr);
-        lv_obj_clear_flag(s_usb_drive_sw, LV_OBJ_FLAG_CLICKABLE); /* row handles tap; switch is display-only */
+        lv_obj_clear_flag(s_usb_drive_sw, LV_OBJ_FLAG_CLICKABLE);
         ui_theme_apply_switch(s_usb_drive_sw);
 
-        s_usb_status_lbl = lv_label_create(row);
+        s_usb_status_lbl = lv_label_create(usb);
         ui_theme_apply_label(s_usb_status_lbl, true);
+        lv_obj_set_style_text_font(s_usb_status_lbl, ui_font_caption(), 0);
         lv_label_set_text(s_usb_status_lbl, "");
-
         settings_page_sync_usb_state();
+        update_sensors_label();
     }
 
-    // Split Length Row
-    s_split_val_lbl = create_clickable_row(s_body, "Split Length", split_row_click_cb);
-    update_split_label_text();
-
-    s_sensors_val_lbl = create_clickable_row(s_body, "Sensors (BLE)", sensors_row_click_cb);
-    update_sensors_label();
+    {
+        lv_obj_t *device = section_group(s_body, "Device");
+        s_datetime_lbl = create_value_row(device, "Date", "", false);
+        update_datetime_label_text();
+        if (s_datetime_timer) {
+            lv_timer_del(s_datetime_timer);
+            s_datetime_timer = NULL;
+        }
+        s_datetime_timer = lv_timer_create(datetime_timer_cb, 60000, NULL);
+    }
 }
 
 void ui_settings_register_split_length_cb(ui_split_length_cb_t cb) { s_split_cb = cb; }
@@ -612,8 +630,21 @@ void settings_page_sync_usb_state(void)
     bool active = app_usb_msc_is_active();
     usb_switch_show(active);
     if (active)
+    {
         usb_status_set("Drive ready - connect USB cable");
-    else if (!s_sd.mounted)
+        return;
+    }
+
+    esp_err_t err = app_usb_msc_last_error();
+    if (err != ESP_OK)
+    {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "USB failed: %s", esp_err_to_name(err));
+        usb_status_set(buf);
+        return;
+    }
+
+    if (!s_sd.mounted)
         usb_status_set("No SD card mounted");
     else
         usb_status_set("");

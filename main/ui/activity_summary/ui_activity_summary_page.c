@@ -375,6 +375,7 @@ void activity_summary_page_create(lv_obj_t *parent)
 
     // Status bar
     ui_status_bar_create(&s_status, s_root);
+    ui_status_bar_set_title(&s_status, "Activity", UI_PAGE_MENU);
 
     // Body
     lv_obj_t *body = lv_obj_create(s_root);
@@ -401,8 +402,8 @@ void activity_summary_page_create(lv_obj_t *parent)
     ui_theme_apply_button(s_btn_prev);
     lv_obj_add_event_cb(s_btn_prev, nav_btn_event_cb, LV_EVENT_CLICKED, (void *)"prev");
     lv_obj_t *prev_lbl = lv_label_create(s_btn_prev);
-    ui_theme_apply_label(prev_lbl, true);
     lv_label_set_text(prev_lbl, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(prev_lbl, ui_theme_palette()->accent_text, 0);
     lv_obj_align(prev_lbl, LV_ALIGN_CENTER, 0, 0);
 
     s_page_lbl = lv_label_create(s_nav_row);
@@ -413,12 +414,12 @@ void activity_summary_page_create(lv_obj_t *parent)
     ui_theme_apply_button(s_btn_next);
     lv_obj_add_event_cb(s_btn_next, nav_btn_event_cb, LV_EVENT_CLICKED, (void *)"next");
     lv_obj_t *next_lbl = lv_label_create(s_btn_next);
-    ui_theme_apply_label(next_lbl, true);
     lv_label_set_text(next_lbl, LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_color(next_lbl, ui_theme_palette()->accent_text, 0);
     lv_obj_align(next_lbl, LV_ALIGN_CENTER, 0, 0);
 
-    lv_obj_set_size(s_btn_prev, 36, 22);
-    lv_obj_set_size(s_btn_next, 36, 22);
+    lv_obj_set_size(s_btn_prev, 40, 32);
+    lv_obj_set_size(s_btn_next, 40, 32);
 
     // List container (paged, non-scrollable)
     s_list = lv_obj_create(body);
@@ -445,10 +446,18 @@ void activity_summary_page_apply_theme(void)
         return;
     ui_status_bar_apply_theme(&s_status);
     // Cards are themed at build time via ui_theme_apply_surface/label.
-    if (s_btn_prev)
+    if (s_btn_prev) {
         ui_theme_apply_button(s_btn_prev);
-    if (s_btn_next)
+        lv_obj_t *glyph = lv_obj_get_child(s_btn_prev, 0);
+        if (glyph)
+            lv_obj_set_style_text_color(glyph, ui_theme_palette()->accent_text, 0);
+    }
+    if (s_btn_next) {
         ui_theme_apply_button(s_btn_next);
+        lv_obj_t *glyph = lv_obj_get_child(s_btn_next, 0);
+        if (glyph)
+            lv_obj_set_style_text_color(glyph, ui_theme_palette()->accent_text, 0);
+    }
     if (s_page_lbl)
         ui_theme_apply_label(s_page_lbl, true);
 }

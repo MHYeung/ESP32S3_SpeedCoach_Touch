@@ -188,7 +188,8 @@ void ui_set_dark_mode(bool enabled)
 {
     ui_s_dark_mode = enabled;
     lvgl_port_lock(0);
-    ui_theme_set(enabled ? UI_THEME_DARK : UI_THEME_LIGHT);
+    /* Switch ON (enabled) must look dark on this panel; palettes were reversed. */
+    ui_theme_set(enabled ? UI_THEME_LIGHT : UI_THEME_DARK);
     data_page_apply_theme();
     settings_page_apply_theme();
     menu_page_apply_theme();

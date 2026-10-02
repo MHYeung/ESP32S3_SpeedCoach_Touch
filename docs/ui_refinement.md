@@ -25,17 +25,15 @@ GPS dropout: speed is omitted from averages when there is no valid fix. Session 
 
 ## Immediate vs later
 
-Shipped in this pass: water lock, stale GPS, split progress/delta, brightness + auto-dim, PWR shortcuts, NVS activity IDs, persisted metric slots, race mode (virtual-boat ahead/behind), step-test rate ladder, themed menu tiles, C3 tracker BLE connect.
+Shipped in this pass: water lock, stale GPS, split progress/delta, brightness + auto-dim, PWR shortcuts, NVS activity IDs, persisted metric slots, race mode (virtual-boat ahead/behind), step-test rate ladder, themed menu tiles, BLE heart-rate strap, C3 tracker GAP connect.
 
-### BLE: C3 tracker pod (connection first)
+### BLE sensors
 
-The menu **Sensors** tile scans for the C3 motion-tracker service UUID `9b7e1000-2b2f-4f71-9b86-4bb2e6d54f00` (see `esp32c3_motion_tracker` `sensor_protocol.h`). NimBLE is a **central + observer only** — the coach does not advertise. A tap connects at GAP level and stores the address in NVS. Motion CCCD subscribe is **not** enabled yet: writing that CCCD is what starts the pod’s 56–448 Hz notify stream.
+Heart-rate straps (`0x180D`) and the RowPod share a two-slot NimBLE central. The strap delivers bpm. The pod delivers one summary per stroke (catch, finish, arc) when its firmware has characteristic `9b7e1005`. Contract, packet layout, reconnect, and the hardware checklist are in [ble_sensors.md](ble_sensors.md).
 
 USB mass-storage stays on the Settings **Export via USB** row, not on the menu.
 
-BLE callbacks must not touch LVGL. The sensors page polls `sensor_hub` at 300 ms. Do not enable PSRAM to hide DRAM cost; log free internal heap before and after NimBLE init.
-
-HR straps (`0x180D`) remain a later pass. ESP32-S3 has no ANT+ radio.
+BLE callbacks must not touch LVGL. The sensors page polls `sensor_hub` at 300 ms. Do not enable PSRAM to hide DRAM cost; log free internal heap before and after NimBLE init. The ESP32-S3 has no ANT+ radio, so ANT-only Garmin straps will not appear.
 
 ### Shipped: race mode
 
@@ -49,6 +47,10 @@ Versioned, sequence-numbered peer packets with monotonic timestamps. Evaluate ES
 
 Saved interval workouts. Rowing / dragon boat / generic paddle profiles that override IMU axis, stroke-period limits, and default metric slots — not the UI shell.
 
+## Glyphs
+
+UI strings are ASCII or `LV_SYMBOL_*`. The tabular number fonts (`lv_font_num_56`, `lv_font_num_32`) carry digits and `+ - . : /` only. Units (`m`, `st`) stay on the caption. Both number fonts fall back to Montserrat so a stray letter draws as text instead of an empty box.
+
 ## Hardware checklist
 
 Portrait first, then all four rotations:
@@ -60,9 +62,15 @@ Portrait first, then all four rotations:
 - Interval WORK/REST color and 5 s cue without covering numbers
 - Race ahead/behind box color with 1 s deadband; projected finish from average speed
 - Step test SPM target rises each piece; SPM box tints outside +/-1 SPM
-- Settings Sensors row opens the tracker scan/connect page; USB export stays in Settings
-- Menu Sensors tile scans for the C3 pod UUID and connects without subscribing to motion notifies
+- Settings Sensors row shows `HR On / Pod Off` and opens the two-card Sensors page; USB export stays in Settings
+- Heart-rate card pairs a `0x180D` strap, shows bpm, and reconnects after a drop. RowPod card subscribes to the per-stroke summary and offers Zero / side
+- Status-rail Bluetooth glyph: accent while HR is fresh, red when a saved strap is lost or stale, hidden after Disconnect
+- HR metric slot shows `--` when bpm is 0. Stroke CSV gains `Heart Rate (bpm)`; splits gain `Avg HR`
 - Menu tiles readable in light and dark (surface fill, accent icon, contrast text)
+- Menu-page title rail is transparent, 20 px, with a back chevron on every sub-page
+- Interval distance/stroke remaining shows a number only; the unit is on the caption
+- Race ahead/behind value shows `+` and `-` without a blank box
+- Sensors status uses `...`, not a missing ellipsis glyph
 - Split rollover updates progress and delta
 - Start/stop toast, save, USB export
 - Auto-dim after 15 s idle while recording; touch restores
@@ -90,4 +98,4 @@ Then flash and walk the checklist above. Do not enable PSRAM to hide RAM cost.
 - No LVGL calls outside the LVGL-owned context
 - GPS loss does not corrupt averages
 - `sdkconfig.defaults` captures target, TinyUSB, fonts, and NimBLE central
-- Stroke detection and CSV columns unchanged aside from device name
+- Stroke detection unchanged. CSV columns are only appended (`Heart Rate (bpm)`, `Avg HR`)

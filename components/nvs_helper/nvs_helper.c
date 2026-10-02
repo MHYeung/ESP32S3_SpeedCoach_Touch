@@ -322,3 +322,101 @@ void nvs_helper_set_sensor_addr_type(uint8_t addr_type)
         nvs_close(handle);
     }
 }
+
+static void get_str_key(const char *key, char *out, size_t out_len)
+{
+    if (!out || out_len == 0) {
+        return;
+    }
+    out[0] = '\0';
+    nvs_handle_t handle;
+    if (open_storage(&handle, NVS_READONLY) != ESP_OK) {
+        return;
+    }
+    size_t len = out_len;
+    if (nvs_get_str(handle, key, out, &len) != ESP_OK) {
+        out[0] = '\0';
+    }
+    nvs_close(handle);
+}
+
+static void set_str_key(const char *key, const char *name)
+{
+    nvs_handle_t handle;
+    if (open_storage(&handle, NVS_READWRITE) != ESP_OK) {
+        return;
+    }
+    nvs_set_str(handle, key, name ? name : "");
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
+void nvs_helper_get_sensor_name(char *out, size_t out_len)
+{
+    get_str_key("sn_name", out, out_len);
+}
+
+void nvs_helper_set_sensor_name(const char *name)
+{
+    set_str_key("sn_name", name);
+}
+
+void nvs_helper_get_hr_addr(uint8_t out[6])
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, 6);
+    nvs_handle_t handle;
+    if (open_storage(&handle, NVS_READONLY) != ESP_OK) {
+        return;
+    }
+    size_t len = 6;
+    nvs_get_blob(handle, "hr_addr", out, &len);
+    nvs_close(handle);
+}
+
+void nvs_helper_set_hr_addr(const uint8_t in[6])
+{
+    if (!in) {
+        return;
+    }
+    nvs_handle_t handle;
+    if (open_storage(&handle, NVS_READWRITE) != ESP_OK) {
+        return;
+    }
+    nvs_set_blob(handle, "hr_addr", in, 6);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
+uint8_t nvs_helper_get_hr_addr_type(void)
+{
+    nvs_handle_t handle;
+    uint8_t val = 0;
+    if (open_storage(&handle, NVS_READONLY) == ESP_OK) {
+        nvs_get_u8(handle, "hr_atyp", &val);
+        nvs_close(handle);
+    }
+    return val;
+}
+
+void nvs_helper_set_hr_addr_type(uint8_t addr_type)
+{
+    nvs_handle_t handle;
+    if (open_storage(&handle, NVS_READWRITE) == ESP_OK) {
+        nvs_set_u8(handle, "hr_atyp", addr_type);
+        nvs_commit(handle);
+        nvs_close(handle);
+    }
+}
+
+void nvs_helper_get_hr_name(char *out, size_t out_len)
+{
+    get_str_key("hr_name", out, out_len);
+}
+
+void nvs_helper_set_hr_name(const char *name)
+{
+    set_str_key("hr_name", name);
+}

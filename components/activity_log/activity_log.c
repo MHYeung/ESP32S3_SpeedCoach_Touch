@@ -1,4 +1,5 @@
 #include "activity_log.h"
+#include "sensor_hub.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -89,6 +90,9 @@ static void activity_log_update_splits(activity_log_t *log,
     if (total_distance_m < log->last_split_dist_m || session_time_s < log->last_split_time_s)
         return;
 
+    uint16_t avg_hr = (log->hr_n > 0) ? (uint16_t)(log->hr_sum / log->hr_n) : 0;
+    bool wrote_split = false;
+
     float dist_delta = total_distance_m - log->last_split_dist_m;
     float time_delta = session_time_s - log->last_split_time_s;
 
@@ -107,9 +111,11 @@ static void activity_log_update_splits(activity_log_t *log,
             .split_dist_m = log->split_interval_m,
             .split_time_s = exact_split_time,
             .split_pace_s = split_pace_s,
-            .avg_spm = spm_value};
+            .avg_spm = spm_value,
+            .avg_hr = avg_hr};
 
         activity_log_append_split(log, &split);
+        wrote_split = true;
 
         log->last_split_dist_m = split_total_dist;
         log->last_split_time_s += exact_split_time;
@@ -120,9 +126,13 @@ static void activity_log_update_splits(activity_log_t *log,
 
     if (include_partial)
     {
-        const float min_partial_m = 0.1f;
-        if (dist_delta >= min_partial_m && time_delta >= 0.0f)
+        /* Incomplete last split still gets a row: 490 m of a 500 m setting,
+         * or a timed piece with no GPS distance yet. */
+        if (time_delta >= 0.5f)
         {
+            if (dist_delta < 0.0f)
+                dist_delta = 0.0f;
+
             float split_pace_s = (dist_delta > 0.1f)
                                      ? (time_delta / (dist_delta / 500.0f))
                                      : 0.0f;
@@ -133,13 +143,22 @@ static void activity_log_update_splits(activity_log_t *log,
                 .split_dist_m = dist_delta,
                 .split_time_s = time_delta,
                 .split_pace_s = split_pace_s,
-                .avg_spm = spm_value};
+                .avg_spm = spm_value,
+                .avg_hr = avg_hr};
 
             activity_log_append_split(log, &split);
+            wrote_split = true;
+            ESP_LOGI(TAG, "Remainder split #%d dist=%.1fm time=%.1fs",
+                     split.split_index, (double)dist_delta, (double)time_delta);
 
             log->last_split_dist_m = total_distance_m;
             log->last_split_time_s = session_time_s;
         }
+    }
+
+    if (wrote_split) {
+        log->hr_sum = 0;
+        log->hr_n = 0;
     }
 }
 
@@ -251,7 +270,8 @@ esp_err_t activity_log_start(activity_log_t *log, sd_mmc_helper_t *sd, time_t st
         // Your Custom Header
         fprintf(log->f_main,
                 "Global Time,Session Time,Distance (m),Pace (/500m),SPM,Avg Pace (/500m),Average Speed (m/s),"
-                "Stroke Length (m),Stroke Count,gps_lat,gps_lon,Power (W),Drive Time (s),Recovery Time (s),Recovery Ratio\n");
+                "Stroke Length (m),Stroke Count,gps_lat,gps_lon,Power (W),Drive Time (s),Recovery Time (s),Recovery Ratio,"
+                "Heart Rate (bpm),Catch (deg),Finish (deg),Arc (deg)\n");
     }
 
     if (log->f_splits)
@@ -283,6 +303,12 @@ esp_err_t activity_log_start(activity_log_t *log, sd_mmc_helper_t *sd, time_t st
             fprintf(log->f_splits, "Split Setting,%.0f meters\n", log->split_interval_m);
         }
         fprintf(log->f_splits, "Activity ID,%u\n", (unsigned int)activity_id);
+        {
+            sensor_hub_slot_info_t hr = {0};
+            sensor_hub_get_slot(SENSOR_KIND_HR, &hr);
+            fprintf(log->f_splits, "HR Sensor,%s\n",
+                    (hr.saved && hr.name[0]) ? hr.name : "none");
+        }
 
         // 3. Add an empty row for separation (optional but readable)
         fprintf(log->f_splits, "\n");
@@ -290,11 +316,11 @@ esp_err_t activity_log_start(activity_log_t *log, sd_mmc_helper_t *sd, time_t st
         // 4. Write the Actual Data Columns
         if (is_interval)
         {
-            fprintf(log->f_splits, "Round,Phase,Target,Unit,Phase Time,Phase Dist (m),Phase Pace (/500m),Avg SPM\n");
+            fprintf(log->f_splits, "Round,Phase,Target,Unit,Phase Time,Phase Dist (m),Phase Pace (/500m),Avg SPM,Avg HR\n");
         }
         else
         {
-            fprintf(log->f_splits, "Split #,Total Dist (m),Split Dist (m),Split Time,Avg Pace (/500m),Avg SPM\n");
+            fprintf(log->f_splits, "Split #,Total Dist (m),Split Dist (m),Split Time,Avg Pace (/500m),Avg SPM,Avg HR\n");
         }
     }
 
@@ -318,12 +344,30 @@ esp_err_t activity_log_append(activity_log_t *log, const activity_log_row_t *row
     char session_time_str[32];
     fmt_session_time_ms(row->session_time_s, session_time_str, sizeof(session_time_str));
 
-    fprintf(log->f_main, "%s,%s,%.1f,%s,%.1f,%s,%.2f,%.2f,%lu,%.7f,%.7f,%.1f,%.2f,%.2f,%.2f\n",
+    char hr_str[8] = {0};
+    char catch_str[16] = {0};
+    char finish_str[16] = {0};
+    char arc_str[16] = {0};
+    if (row->hr_bpm > 0) {
+        snprintf(hr_str, sizeof(hr_str), "%u", (unsigned)row->hr_bpm);
+    }
+    if (row->pod_valid) {
+        snprintf(catch_str, sizeof(catch_str), "%.1f", (double)row->pod_catch_deg);
+        snprintf(finish_str, sizeof(finish_str), "%.1f", (double)row->pod_finish_deg);
+        snprintf(arc_str, sizeof(arc_str), "%.1f", (double)row->pod_arc_deg);
+    }
+    fprintf(log->f_main, "%s,%s,%.1f,%s,%.1f,%s,%.2f,%.2f,%lu,%.7f,%.7f,%.1f,%.2f,%.2f,%.2f,%s,%s,%s,%s\n",
             time_str, session_time_str, (double)row->total_distance_m, pace_inst_str,
             (double)row->spm_instant, pace_avg_str, (double)row->avg_speed_mps,
             (double)row->stroke_length_m, (unsigned long)row->stroke_count,
             row->gps_lat, row->gps_lon, (double)row->power_w,
-            (double)row->drive_time_s, (double)row->recovery_time_s, (double)row->recovery_ratio);
+            (double)row->drive_time_s, (double)row->recovery_time_s, (double)row->recovery_ratio,
+            hr_str, catch_str, finish_str, arc_str);
+
+    if (row->hr_bpm > 0 && log->hr_n < UINT16_MAX) {
+        log->hr_sum += row->hr_bpm;
+        log->hr_n++;
+    }
 
     log->pending++;
     if (log->pending >= log->flush_every_n)
@@ -360,13 +404,18 @@ esp_err_t activity_log_append_split(activity_log_t *log, const activity_log_spli
     char pace_str[24];
     format_pace(row->split_pace_s, pace_str, sizeof(pace_str));
 
-    fprintf(log->f_splits, "%d,%.0f,%.0f,%s,%s,%.1f\n",
+    char hr_str[8] = {0};
+    if (row->avg_hr > 0) {
+        snprintf(hr_str, sizeof(hr_str), "%u", (unsigned)row->avg_hr);
+    }
+    fprintf(log->f_splits, "%d,%.0f,%.0f,%s,%s,%.1f,%s\n",
             row->split_index,
             (double)row->total_dist_m,
             (double)row->split_dist_m,
             split_time_str,
             pace_str,
-            (double)row->avg_spm);
+            (double)row->avg_spm,
+            hr_str);
 
     fflush(log->f_splits);
     return ESP_OK;
@@ -399,7 +448,11 @@ esp_err_t activity_log_append_interval(activity_log_t *log, const activity_log_i
     char pace_str[24];
     format_pace(row->phase_pace_s, pace_str, sizeof(pace_str));
 
-    fprintf(log->f_splits, "%u,%s,%u,%s,%s,%.1f,%s,%.1f\n",
+    char hr_str[8] = {0};
+    if (row->avg_hr > 0) {
+        snprintf(hr_str, sizeof(hr_str), "%u", (unsigned)row->avg_hr);
+    }
+    fprintf(log->f_splits, "%u,%s,%u,%s,%s,%.1f,%s,%.1f,%s\n",
             (unsigned)row->round_index,
             (row->phase[0] != 0) ? row->phase : "--",
             (unsigned)row->target_value,
@@ -407,7 +460,8 @@ esp_err_t activity_log_append_interval(activity_log_t *log, const activity_log_i
             phase_time_str,
             (double)row->phase_distance_m,
             pace_str,
-            (double)row->avg_spm);
+            (double)row->avg_spm,
+            hr_str);
 
     fflush(log->f_splits);
     return ESP_OK;

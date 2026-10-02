@@ -5,6 +5,7 @@
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
 #include "ui_settings_page.h"
+#include "esp_heap_caps.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -24,10 +25,25 @@ static sdmmc_card_t *s_msc_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage = NULL;
 static QueueHandle_t s_cmd_q;
 static volatile bool s_busy;
+static esp_err_t s_last_err = ESP_OK;
 
 bool app_usb_msc_is_active(void)
 {
     return s_usb_msc_active;
+}
+
+esp_err_t app_usb_msc_last_error(void)
+{
+    return s_last_err;
+}
+
+static void log_heap(const char *where)
+{
+    ESP_LOGI(TAG, "%s dma_free=%u dma_largest=%u internal=%u",
+             where,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
 
 static esp_err_t usb_msc_enter(void)
@@ -50,6 +66,8 @@ static esp_err_t usb_msc_enter(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    log_heap("enter");
+
     /* VFS unmount already calls host->deinit_p (sdmmc_host_deinit_slot)
      * and frees the card. Do not call sdmmc_host_deinit() again. */
     esp_err_t ret = sd_mmc_helper_unmount(&s_sd);
@@ -71,13 +89,14 @@ static esp_err_t usb_msc_enter(void)
     msc_cfg.medium.card = s_msc_card;
     msc_cfg.fat_fs.base_path = NULL;
     msc_cfg.fat_fs.config.format_if_mount_failed = false;
-    msc_cfg.fat_fs.config.max_files = 5;
-    msc_cfg.fat_fs.config.allocation_unit_size = 16 * 1024;
+    msc_cfg.fat_fs.config.max_files = 2;
+    msc_cfg.fat_fs.config.allocation_unit_size = 0;
     msc_cfg.fat_fs.do_not_format = true;
     msc_cfg.fat_fs.format_flags = 0;
     msc_cfg.mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB;
 
     tinyusb_msc_driver_config_t driver_cfg = { 0 };
+    log_heap("before msc driver");
     ret = tinyusb_msc_install_driver(&driver_cfg);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
     {
@@ -93,7 +112,8 @@ static esp_err_t usb_msc_enter(void)
         goto fail;
     }
 
-    const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tusb_cfg.task.size = 3072; /* default 4096; DMA RAM is the scarce resource */
     ret = tinyusb_driver_install(&tusb_cfg);
     if (ret != ESP_OK)
     {
@@ -104,6 +124,7 @@ static esp_err_t usb_msc_enter(void)
     }
 
     s_usb_msc_active = true;
+    log_heap("usb active");
     ESP_LOGI(TAG, "USB storage mode active - plug USB to computer");
     return ESP_OK;
 
@@ -151,17 +172,37 @@ static void usb_msc_worker(void *arg)
         if (xQueueReceive(s_cmd_q, &cmd, portMAX_DELAY) != pdTRUE)
             continue;
 
-        if (cmd == USB_MSC_CMD_ENTER)
-            (void)usb_msc_enter();
-        else
-            (void)usb_msc_leave();
-
+        s_last_err = (cmd == USB_MSC_CMD_ENTER) ? usb_msc_enter() : usb_msc_leave();
         s_busy = false;
 
-        lvgl_port_lock(0);
-        settings_page_sync_usb_state();
-        lvgl_port_unlock();
+        if (lvgl_port_lock(200))
+        {
+            settings_page_sync_usb_state();
+            lvgl_port_unlock();
+        }
     }
+}
+
+esp_err_t app_usb_msc_init(void)
+{
+    if (s_cmd_q)
+        return ESP_OK;
+
+    s_cmd_q = xQueueCreate(2, sizeof(usb_msc_cmd_t));
+    if (!s_cmd_q)
+        return ESP_ERR_NO_MEM;
+
+    /* FAT unmount/remount needs more than 4 KB; overflow here kills stroke_task. */
+    if (xTaskCreate(usb_msc_worker, "usb_msc", 6144, NULL, 5, NULL) != pdPASS)
+    {
+        ESP_LOGE(TAG, "worker create failed, free internal=%u largest=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        vQueueDelete(s_cmd_q);
+        s_cmd_q = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
 }
 
 static esp_err_t usb_msc_post(usb_msc_cmd_t cmd)
@@ -174,18 +215,13 @@ static esp_err_t usb_msc_post(usb_msc_cmd_t cmd)
 
     if (!s_cmd_q)
     {
-        s_cmd_q = xQueueCreate(1, sizeof(usb_msc_cmd_t));
-        if (!s_cmd_q)
-            return ESP_ERR_NO_MEM;
-        if (xTaskCreate(usb_msc_worker, "usb_msc", 8192, NULL, 5, NULL) != pdPASS)
-        {
-            vQueueDelete(s_cmd_q);
-            s_cmd_q = NULL;
-            return ESP_ERR_NO_MEM;
-        }
+        esp_err_t err = app_usb_msc_init();
+        if (err != ESP_OK)
+            return err;
     }
 
     s_busy = true;
+    s_last_err = ESP_OK;
     if (xQueueSend(s_cmd_q, &cmd, 0) != pdTRUE)
     {
         s_busy = false;

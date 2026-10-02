@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -45,3 +46,13 @@ void nvs_helper_get_sensor_addr(uint8_t out[6]);
 void nvs_helper_set_sensor_addr(const uint8_t in[6]);
 uint8_t nvs_helper_get_sensor_addr_type(void);
 void nvs_helper_set_sensor_addr_type(uint8_t addr_type);
+void nvs_helper_get_sensor_name(char *out, size_t out_len);
+void nvs_helper_set_sensor_name(const char *name);
+
+/* Heart-rate strap. Separate from sn_addr so an existing RowPod pairing survives. */
+void nvs_helper_get_hr_addr(uint8_t out[6]);
+void nvs_helper_set_hr_addr(const uint8_t in[6]);
+uint8_t nvs_helper_get_hr_addr_type(void);
+void nvs_helper_set_hr_addr_type(uint8_t addr_type);
+void nvs_helper_get_hr_name(char *out, size_t out_len);
+void nvs_helper_set_hr_name(const char *name);

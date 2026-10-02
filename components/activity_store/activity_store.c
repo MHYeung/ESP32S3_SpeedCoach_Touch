@@ -21,6 +21,27 @@ static bool file_exists(const char *path) {
     return (path && stat(path, &st) == 0);
 }
 
+/* Heart rate is the field after `commas` commas. Blank or absent is 0. */
+static uint16_t hr_after_commas(const char *s, int commas)
+{
+    const char *p = s;
+    for (int i = 0; i < commas && p; i++) {
+        p = strchr(p, ',');
+        if (!p) {
+            return 0;
+        }
+        p++;
+    }
+    if (!p || *p == '\0') {
+        return 0;
+    }
+    unsigned v = 0;
+    if (sscanf(p, "%u", &v) != 1 || v > 250) {
+        return 0;
+    }
+    return (uint16_t)v;
+}
+
 static bool resolve_dir_layout(const char *dir,
                                char *out_strokes, size_t strokes_len,
                                char *out_splits, size_t splits_len)
@@ -274,6 +295,8 @@ esp_err_t activity_store_load_splits_page(const char *in_path_or_base,
     float total_time_s = 0.0f;
     float last_total_dist = 0.0f;
     float cumulative_dist = 0.0f;
+    uint32_t hr_sum = 0;
+    uint16_t hr_n = 0;
 
     const bool fast_page_only = (out_total_count == NULL && out_summary == NULL);
 
@@ -337,6 +360,13 @@ esp_err_t activity_store_load_splits_page(const char *in_path_or_base,
             strncpy(row.split_time_str, tstr, sizeof(row.split_time_str) - 1);
             strncpy(row.pace_str, pstr, sizeof(row.pace_str) - 1);
             row.avg_spm = (n >= 6) ? (float)spm : 0.0f;
+            {
+                uint16_t hr = hr_after_commas(p, 6);
+                if (hr > 0 && hr_n < UINT16_MAX) {
+                    hr_sum += hr;
+                    hr_n++;
+                }
+            }
             row.is_interval = false;
             snprintf(row.label, sizeof(row.label), "%lu", (unsigned long)row.split_index);
 
@@ -368,6 +398,13 @@ esp_err_t activity_store_load_splits_page(const char *in_path_or_base,
             strncpy(row.split_time_str, tstr, sizeof(row.split_time_str) - 1);
             strncpy(row.pace_str, pstr, sizeof(row.pace_str) - 1);
             row.avg_spm = (n >= 8) ? (float)spm : 0.0f;
+            {
+                uint16_t hr = hr_after_commas(p, 8);
+                if (hr > 0 && hr_n < UINT16_MAX) {
+                    hr_sum += hr;
+                    hr_n++;
+                }
+            }
             row.is_interval = true;
             strncpy(row.phase, phase, sizeof(row.phase) - 1);
             row.target_value = (uint32_t)target;
@@ -405,6 +442,7 @@ esp_err_t activity_store_load_splits_page(const char *in_path_or_base,
         } else {
             out_summary->avg_pace_s_per500 = 0.0f;
         }
+        out_summary->avg_hr = (hr_n > 0) ? (uint16_t)(hr_sum / hr_n) : 0;
     }
 
     // If file had data but we stored 0 (max_rows=0) still OK.

@@ -163,6 +163,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const char *title, lv_obj_t **out_dd
         dd = lv_dropdown_create(line);
         lv_dropdown_set_options(dd, "Time\nDistance\nStrokes");
         lv_dropdown_set_selected(dd, 0);
+        ui_theme_apply_field(dd);
         lv_obj_add_event_cb(dd, dd_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
     else
@@ -175,15 +176,18 @@ static lv_obj_t *make_row(lv_obj_t *parent, const char *title, lv_obj_t **out_dd
     }
 
     lv_obj_t *dec = lv_btn_create(line);
+    ui_theme_apply_stepper(dec);
     lv_obj_t *d = lv_label_create(dec);
     lv_label_set_text(d, "-");
     lv_obj_center(d);
 
     lv_obj_t *sb = lv_spinbox_create(line);
     lv_obj_set_width(sb, 76);
+    ui_theme_apply_field(sb);
     ui_yield_for_idle();
 
     lv_obj_t *inc = lv_btn_create(line);
+    ui_theme_apply_stepper(inc);
     lv_obj_t *i = lv_label_create(inc);
     lv_label_set_text(i, "+");
     lv_obj_center(i);
@@ -303,6 +307,7 @@ void interval_setup_page_create(lv_obj_t *parent)
 
     // Fixed status bar
     ui_status_bar_create(&s_sb, s_root);
+    ui_status_bar_set_title(&s_sb, "Interval", UI_PAGE_MENU);
 
     // ONE scroll container for everything else
     s_scroll = lv_obj_create(s_root);
@@ -356,6 +361,7 @@ void interval_setup_page_create(lv_obj_t *parent)
     lv_obj_t *b_cancel = lv_btn_create(s_btn_row);
     lv_obj_add_event_cb(b_cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_width(b_cancel, lv_pct(48));
+    ui_theme_apply_button_secondary(b_cancel);
     lv_obj_t *lc = lv_label_create(b_cancel);
     lv_label_set_text(lc, "Cancel");
     lv_obj_center(lc);
@@ -363,6 +369,7 @@ void interval_setup_page_create(lv_obj_t *parent)
     lv_obj_t *b_confirm = lv_btn_create(s_btn_row);
     lv_obj_add_event_cb(b_confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_width(b_confirm, lv_pct(48));
+    ui_theme_apply_button(b_confirm);
     lv_obj_t *lq = lv_label_create(b_confirm);
     lv_label_set_text(lq, "Confirm");
     lv_obj_center(lq);
@@ -376,6 +383,16 @@ void interval_setup_page_apply_theme(void)
     if (!s_root)
         return;
     ui_status_bar_apply_theme(&s_sb);
+    if (dd_work)
+        ui_theme_apply_field(dd_work);
+    if (dd_rest)
+        ui_theme_apply_field(dd_rest);
+    if (sb_work)
+        ui_theme_apply_field(sb_work);
+    if (sb_rest)
+        ui_theme_apply_field(sb_rest);
+    if (sb_rounds)
+        ui_theme_apply_field(sb_rounds);
 }
 void interval_setup_page_on_orientation_changed(void)
 {

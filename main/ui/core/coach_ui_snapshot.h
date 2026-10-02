@@ -6,6 +6,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef enum {
+    SENSOR_LINK_NONE = 0,   /* no saved strap, or the user disconnected it */
+    SENSOR_LINK_LIVE,       /* a heart-rate sample newer than 5 s */
+    SENSOR_LINK_LOST,       /* saved strap, but no fresh sample */
+} sensor_link_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -52,6 +58,13 @@ typedef struct {
     float race_delta_s;
     float race_remaining_m;
     float race_projected_s;
+
+    uint16_t hr_bpm;            /* 0 when no fresh sample */
+    sensor_link_t sensor_link;
+    bool pod_valid;
+    float pod_catch_deg;
+    float pod_finish_deg;
+    float pod_arc_deg;
 } coach_ui_snapshot_t;
 
 void coach_ui_snapshot_init(void);

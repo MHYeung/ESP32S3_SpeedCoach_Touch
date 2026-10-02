@@ -22,18 +22,20 @@ Firmware slug: `esp32s3_speed_coach`. Rename this directory from `waveshare2.8lc
 | Brightness / auto-dim | Settings slider; auto-dim after 15 s idle while recording |
 | Theme / orientation | Dark/light (corrected mapping), portrait-first with landscape support |
 | USB export | MSC "Export via USB" |
+| BLE heart rate | Polar / Garmin strap (`0x180D`): live HR metric, status-rail glyph, CSV column. See [docs/ble_sensors.md](docs/ble_sensors.md) |
+| BLE RowPod | Per-stroke catch, finish, and arc from the pod summary characteristic. See [docs/ble_sensors.md](docs/ble_sensors.md) |
 
 ## On-water controls
 
 - **PWR short press** (data/interval pages): start or stop/save
 - **PWR long press**: shutdown prompt
 - **Long-press status rail**: toggle water/touch lock
-- **Tap a metric** (unlocked): cycle Pace / Avg Pace / Time / Distance / Speed / SPM / Stroke Len / Strokes
+- **Tap a metric** (unlocked): cycle Pace / Avg Pace / Time / Distance / Speed / SPM / Stroke Len / Strokes / HR / Catch / Arc
 - **Swipe down** (unlocked): menu. **Swipe left** (if an interval is armed): interval live page
 
 ## Not in this firmware (see [docs/ui_refinement.md](docs/ui_refinement.md))
 
-BLE power sensors, race target-pace follow, peer link mode, interval presets, and sport profiles.
+BLE power sensors, peer link mode, interval presets, and sport profiles. Race target-pace follow is on the Race tile. RowPod catch and arc are on the live metric cycle when a pod is connected.
 
 ---
 
@@ -84,6 +86,7 @@ Portrait 240×320 is the reference layout. After a UI/font change run `idf.py si
 
 ## Changelog
 
+- 2026-10-02 — BLE heart-rate strap (`0x180D`) and RowPod per-stroke summary (`9b7e1005`): live HR, catch, and arc, plus appended CSV columns. See [docs/ble_sensors.md](docs/ble_sensors.md)
 - 2026-08-19 — product rename to ESP32-S3 Speed Coach; portrait-first live UI; tabular pace fonts; snapshot UI path; GPS-average and activity-ID fixes
 - 2026-03-09 — settings — USB device mode
 - 2026-01-28 — ui — simplify UI

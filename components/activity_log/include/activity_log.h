@@ -16,7 +16,8 @@ typedef struct {
     float split_dist_m;       
     float split_time_s;       
     float split_pace_s;       
-    float avg_spm;            
+    float avg_spm;
+    uint16_t avg_hr;          /* 0 when the strap had no samples in this split */
 } activity_log_split_row_t;
 
 // Existing Stroke Row
@@ -36,6 +37,11 @@ typedef struct {
     float drive_time_s;
     float recovery_time_s;
     float recovery_ratio;
+    uint16_t hr_bpm;          /* 0 when no fresh sample */
+    bool pod_valid;
+    float pod_catch_deg;
+    float pod_finish_deg;
+    float pod_arc_deg;
 } activity_log_row_t;
 
 typedef struct {
@@ -47,6 +53,7 @@ typedef struct {
     float phase_distance_m;
     float phase_pace_s;
     float avg_spm;
+    uint16_t avg_hr;          /* 0 when the strap had no samples in this phase */
 } activity_log_interval_row_t;
 
 typedef struct {
@@ -94,6 +101,9 @@ typedef struct {
     float last_split_dist_m;     // Distance when last split occurred
     float last_split_time_s;     // Time when last split occurred
     int   next_split_index;      // 1, 2, 3...
+
+    uint32_t hr_sum;             /* non-zero samples since the last split row */
+    uint16_t hr_n;
 } activity_log_t;
 
 void activity_log_init(activity_log_t *log);

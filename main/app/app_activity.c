@@ -245,8 +245,23 @@ void activity_worker_task(void *arg)
             float final_time_s = snapshot.duration_ms / 1000.0f;
             if (s_act_log.opened)
             {
+                /* Drain IMU log messages so last GPS/stroke distance is in the file
+                 * before we write the remainder split. */
+                activity_log_msg_t pending;
+                while (s_log_q && xQueueReceive(s_log_q, &pending, 0) == pdTRUE)
+                {
+                    if (pending.kind == ACT_LOG_ROW_STROKE)
+                        activity_log_append(&s_act_log, &pending.data.stroke);
+                    else if (pending.kind == ACT_LOG_ROW_INTERVAL)
+                        activity_log_append_interval(&s_act_log, &pending.data.interval);
+                }
+
+                float dist_m = snapshot.distance_m;
+                if (s_act_log.last_row_distance_m > dist_m)
+                    dist_m = s_act_log.last_row_distance_m;
+
                 bool need_final_row = !s_act_log.has_last_row ||
-                                      (snapshot.distance_m - s_act_log.last_row_distance_m) >= 0.1f ||
+                                      (dist_m - s_act_log.last_row_distance_m) >= 0.1f ||
                                       (final_time_s - s_act_log.last_row_time_s) >= 0.1f;
 
                 if (need_final_row)
@@ -256,7 +271,7 @@ void activity_worker_task(void *arg)
 
                     final_row.rtc_time = snapshot.end_ts;
                     final_row.session_time_s = final_time_s;
-                    final_row.total_distance_m = snapshot.distance_m;
+                    final_row.total_distance_m = dist_m;
                     final_row.pace_500m_s = avg_pace_s;
                     final_row.spm_instant = snapshot.avg_spm;
                     final_row.avg_pace_500m_s = avg_pace_s;
@@ -273,7 +288,7 @@ void activity_worker_task(void *arg)
                     activity_log_append(&s_act_log, &final_row);
                 }
 
-                activity_log_finalize(&s_act_log, snapshot.distance_m, final_time_s, snapshot.avg_spm);
+                activity_log_finalize(&s_act_log, dist_m, final_time_s, snapshot.avg_spm);
             }
 
             // STOP THE LOGGER: This flushes and closes the CSV file.

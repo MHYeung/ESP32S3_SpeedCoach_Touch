@@ -107,12 +107,14 @@ static lv_obj_t *make_spin_pair(lv_obj_t *parent, const char *title, lv_obj_t **
 
     lv_obj_t *a = lv_spinbox_create(line);
     lv_obj_set_width(a, 72);
+    ui_theme_apply_field(a);
     ui_yield_for_idle();
     lv_obj_t *sep = lv_label_create(line);
     lv_label_set_text(sep, mid);
     ui_theme_apply_label(sep, true);
     lv_obj_t *b = lv_spinbox_create(line);
     lv_obj_set_width(b, 72);
+    ui_theme_apply_field(b);
     ui_yield_for_idle();
 
     if (out_a)
@@ -133,6 +135,7 @@ void race_setup_page_create(lv_obj_t *parent)
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
     ui_status_bar_create(&s_sb, s_root);
+    ui_status_bar_set_title(&s_sb, "Race", UI_PAGE_MENU);
 
     s_scroll = lv_obj_create(s_root);
     lv_obj_set_width(s_scroll, lv_pct(100));
@@ -168,6 +171,7 @@ void race_setup_page_create(lv_obj_t *parent)
     lv_dropdown_set_options(s_dd_dist, "200 m\n500 m\n1000 m\n2000 m\nCustom");
     lv_dropdown_set_selected(s_dd_dist, 2);
     lv_obj_set_width(s_dd_dist, lv_pct(100));
+    ui_theme_apply_field(s_dd_dist);
     lv_obj_add_event_cb(s_dd_dist, dist_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     s_custom_row = lv_obj_create(s_scroll);
@@ -180,6 +184,7 @@ void race_setup_page_create(lv_obj_t *parent)
 
     s_sb_custom = lv_spinbox_create(s_custom_row);
     lv_obj_set_width(s_sb_custom, lv_pct(100));
+    ui_theme_apply_field(s_sb_custom);
     ui_yield_for_idle();
     lv_spinbox_set_range(s_sb_custom, 50, 10000);
     lv_spinbox_set_step(s_sb_custom, 50);
@@ -198,6 +203,7 @@ void race_setup_page_create(lv_obj_t *parent)
     lv_obj_t *b_cancel = lv_btn_create(btn_row);
     lv_obj_add_event_cb(b_cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_width(b_cancel, lv_pct(48));
+    ui_theme_apply_button_secondary(b_cancel);
     lv_obj_t *lc = lv_label_create(b_cancel);
     lv_label_set_text(lc, "Cancel");
     lv_obj_center(lc);
@@ -205,6 +211,7 @@ void race_setup_page_create(lv_obj_t *parent)
     lv_obj_t *b_confirm = lv_btn_create(btn_row);
     lv_obj_add_event_cb(b_confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_width(b_confirm, lv_pct(48));
+    ui_theme_apply_button(b_confirm);
     lv_obj_t *lq = lv_label_create(b_confirm);
     lv_label_set_text(lq, "Confirm");
     lv_obj_center(lq);
@@ -215,6 +222,14 @@ void race_setup_page_apply_theme(void)
     if (!s_root)
         return;
     ui_status_bar_apply_theme(&s_sb);
+    if (s_dd_dist)
+        ui_theme_apply_field(s_dd_dist);
+    if (s_sb_custom)
+        ui_theme_apply_field(s_sb_custom);
+    if (s_sb_min)
+        ui_theme_apply_field(s_sb_min);
+    if (s_sb_sec)
+        ui_theme_apply_field(s_sb_sec);
 }
 
 void race_setup_page_on_orientation_changed(void)

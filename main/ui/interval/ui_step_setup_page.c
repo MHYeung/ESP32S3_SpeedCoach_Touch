@@ -87,19 +87,23 @@ static lv_obj_t *make_value_row(lv_obj_t *parent, const char *title, bool show_d
         dd = lv_dropdown_create(line);
         lv_dropdown_set_options(dd, "Time\nDistance\nStrokes");
         lv_dropdown_set_selected(dd, 0);
+        ui_theme_apply_field(dd);
         lv_obj_add_event_cb(dd, dd_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
 
     lv_obj_t *dec = lv_btn_create(line);
+    ui_theme_apply_stepper(dec);
     lv_obj_t *d = lv_label_create(dec);
     lv_label_set_text(d, "-");
     lv_obj_center(d);
 
     lv_obj_t *sb = lv_spinbox_create(line);
     lv_obj_set_width(sb, 76);
+    ui_theme_apply_field(sb);
     ui_yield_for_idle();
 
     lv_obj_t *inc = lv_btn_create(line);
+    ui_theme_apply_stepper(inc);
     lv_obj_t *i = lv_label_create(inc);
     lv_label_set_text(i, "+");
     lv_obj_center(i);
@@ -160,6 +164,7 @@ void step_setup_page_create(lv_obj_t *parent)
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
     ui_status_bar_create(&s_sb, s_root);
+    ui_status_bar_set_title(&s_sb, "Step test", UI_PAGE_MENU);
 
     s_scroll = lv_obj_create(s_root);
     lv_obj_set_width(s_scroll, lv_pct(100));
@@ -212,6 +217,7 @@ void step_setup_page_create(lv_obj_t *parent)
     lv_obj_t *b_cancel = lv_btn_create(btn_row);
     lv_obj_add_event_cb(b_cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_width(b_cancel, lv_pct(48));
+    ui_theme_apply_button_secondary(b_cancel);
     lv_obj_t *lc = lv_label_create(b_cancel);
     lv_label_set_text(lc, "Cancel");
     lv_obj_center(lc);
@@ -219,6 +225,7 @@ void step_setup_page_create(lv_obj_t *parent)
     lv_obj_t *b_confirm = lv_btn_create(btn_row);
     lv_obj_add_event_cb(b_confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_width(b_confirm, lv_pct(48));
+    ui_theme_apply_button(b_confirm);
     lv_obj_t *lq = lv_label_create(b_confirm);
     lv_label_set_text(lq, "Confirm");
     lv_obj_center(lq);
@@ -229,6 +236,20 @@ void step_setup_page_apply_theme(void)
     if (!s_root)
         return;
     ui_status_bar_apply_theme(&s_sb);
+    if (dd_work)
+        ui_theme_apply_field(dd_work);
+    if (dd_rest)
+        ui_theme_apply_field(dd_rest);
+    if (sb_work)
+        ui_theme_apply_field(sb_work);
+    if (sb_rest)
+        ui_theme_apply_field(sb_rest);
+    if (sb_rounds)
+        ui_theme_apply_field(sb_rounds);
+    if (sb_spm_start)
+        ui_theme_apply_field(sb_spm_start);
+    if (sb_spm_step)
+        ui_theme_apply_field(sb_spm_step);
 }
 
 void step_setup_page_on_orientation_changed(void)

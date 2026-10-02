@@ -44,8 +44,9 @@ static void label_set_text_if_changed(lv_obj_t *label, const char *text)
 
 static void style_box(lv_obj_t *box)
 {
-    ui_theme_apply_surface_border(box);
-    lv_obj_set_style_radius(box, 0, 0);
+    ui_theme_apply_surface(box);
+    lv_obj_set_style_radius(box, 8, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 }
 
@@ -59,7 +60,7 @@ static void apply_delta_tint(race_tint_t tint)
         style_box(s_delta_box);
         if (s_delta_val) {
             ui_theme_apply_label(s_delta_val, false);
-            lv_obj_set_style_text_font(s_delta_val, &lv_font_montserrat_48, 0);
+            lv_obj_set_style_text_font(s_delta_val, ui_font_value_lg(), 0);
         }
         if (s_delta_title)
             ui_theme_apply_label(s_delta_title, true);
@@ -91,8 +92,7 @@ static lv_obj_t *create_slot(lv_obj_t *parent, const char *title, lv_obj_t **out
     lv_label_set_text(t, title);
 
     lv_obj_t *v = lv_label_create(box);
-    /* Value fonts (num_56/32) omit '+'; Montserrat has ASCII + and - for delta. */
-    lv_obj_set_style_text_font(v, primary ? &lv_font_montserrat_48 : ui_font_value_sm(), 0);
+    lv_obj_set_style_text_font(v, primary ? ui_font_value_lg() : ui_font_value_sm(), 0);
     ui_theme_apply_label(v, false);
     lv_label_set_text(v, "--");
 

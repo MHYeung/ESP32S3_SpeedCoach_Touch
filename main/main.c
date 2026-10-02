@@ -26,6 +26,7 @@
 #include "app/app_power.h"
 #include "app/app_settings.h"
 #include "app/app_time.h"
+#include "app/app_usb_msc.h"
 
 static const char *TAG = "app";
 
@@ -68,6 +69,8 @@ void app_main(void)
 
     xTaskCreate(activity_logger_task, "activity_logger", 6144, NULL, 6, NULL);
     xTaskCreate(activity_worker_task, "activity_worker", 8192, NULL, 9, &s_act_worker_task);
+    if (app_usb_msc_init() != ESP_OK)
+        ESP_LOGE(TAG, "USB MSC worker not started");
 
     /* Create UI in separate module */
     ui_init(s_disp);

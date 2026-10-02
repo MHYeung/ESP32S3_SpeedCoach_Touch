@@ -13,6 +13,9 @@ typedef enum {
     DATA_METRIC_SPM,
     DATA_METRIC_STROKE_LEN,
     DATA_METRIC_STROKE_COUNT,
+    DATA_METRIC_HR,
+    DATA_METRIC_CATCH,
+    DATA_METRIC_ARC,
     DATA_METRIC_COUNT
 } data_metric_t;
 
@@ -25,6 +28,10 @@ typedef struct {
     float spm;
     float stroke_len_m;
     uint32_t stroke_count;
+    uint16_t hr_bpm;
+    bool pod_valid;
+    float pod_catch_deg;
+    float pod_arc_deg;
 } data_values_t;
 
 void data_page_create(lv_obj_t *parent);

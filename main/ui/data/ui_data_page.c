@@ -83,6 +83,18 @@ static void metric_title_unit(data_metric_t metric, const char **title, const ch
         *title = "Strokes";
         *unit = "";
         break;
+    case DATA_METRIC_HR:
+        *title = "HR";
+        *unit = "bpm";
+        break;
+    case DATA_METRIC_CATCH:
+        *title = "Catch";
+        *unit = "deg";
+        break;
+    case DATA_METRIC_ARC:
+        *title = "Arc";
+        *unit = "deg";
+        break;
     default:
         *title = "?";
         *unit = "";
@@ -155,6 +167,27 @@ static void apply_metric_to_slot(int idx)
             snprintf(value_buf, sizeof(value_buf), "%lu", (unsigned long)s_values.stroke_count);
         }
         break;
+    case DATA_METRIC_HR:
+        if (s_values.hr_bpm == 0) {
+            snprintf(value_buf, sizeof(value_buf), "--");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%u", (unsigned)s_values.hr_bpm);
+        }
+        break;
+    case DATA_METRIC_CATCH:
+        if (!s_values.pod_valid) {
+            snprintf(value_buf, sizeof(value_buf), "--");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%.0f", (double)s_values.pod_catch_deg);
+        }
+        break;
+    case DATA_METRIC_ARC:
+        if (!s_values.pod_valid) {
+            snprintf(value_buf, sizeof(value_buf), "--");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%.0f", (double)s_values.pod_arc_deg);
+        }
+        break;
     default:
         snprintf(value_buf, sizeof(value_buf), "--");
         break;
@@ -189,8 +222,9 @@ static void slot_event_cb(lv_event_t *e)
 
 static void style_box(lv_obj_t *box)
 {
-    ui_theme_apply_surface_border(box);
-    lv_obj_set_style_radius(box, 0, 0);
+    ui_theme_apply_surface(box);
+    lv_obj_set_style_radius(box, 8, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(box, LV_DIR_NONE);
 }
@@ -226,9 +260,9 @@ static void build_slot(int idx)
 static void apply_layout(void)
 {
     lv_obj_set_layout(s_root, LV_LAYOUT_GRID);
-    lv_obj_set_style_pad_all(s_root, 0, 0);
-    lv_obj_set_style_pad_row(s_root, 0, 0);
-    lv_obj_set_style_pad_column(s_root, 0, 0);
+    lv_obj_set_style_pad_all(s_root, 4, 0);
+    lv_obj_set_style_pad_row(s_root, 4, 0);
+    lv_obj_set_style_pad_column(s_root, 4, 0);
     lv_obj_set_style_border_width(s_root, 0, 0);
 
     lv_obj_set_style_text_font(s_slot_value[0], ui_font_value_lg(), 0);
@@ -402,6 +436,10 @@ void data_page_apply_snapshot(const coach_ui_snapshot_t *snap)
     s_values.spm = snap->spm;
     s_values.stroke_len_m = snap->stroke_len_m;
     s_values.stroke_count = snap->stroke_count;
+    s_values.hr_bpm = snap->hr_bpm;
+    s_values.pod_valid = snap->pod_valid;
+    s_values.pod_catch_deg = snap->pod_catch_deg;
+    s_values.pod_arc_deg = snap->pod_arc_deg;
     for (int i = 0; i < DATA_SLOT_MAX; i++) {
         apply_metric_to_slot(i);
     }

@@ -14,12 +14,37 @@
 #include "ui.h"
 #include "ui_interval_data_page.h"
 #include "qmi8658.h"
+#include "sensor_hub.h"
 #include "stroke_detection.h"
 
 #include <time.h>
 #include <string.h>
 
 static const char *TAG = "app";
+static uint32_t s_phase_hr_sum;
+static uint16_t s_phase_hr_n;
+
+static uint16_t take_phase_hr_avg(void)
+{
+    uint16_t avg = 0;
+    if (s_phase_hr_n > 0) {
+        avg = (uint16_t)(s_phase_hr_sum / s_phase_hr_n);
+    }
+    s_phase_hr_sum = 0;
+    s_phase_hr_n = 0;
+    return avg;
+}
+
+static sensor_link_t sensor_link_from_live(const sensor_hub_live_t *live)
+{
+    if (live->hr_bpm > 0) {
+        return SENSOR_LINK_LIVE;
+    }
+    if (live->hr_saved && !live->hr_paused) {
+        return SENSOR_LINK_LOST;
+    }
+    return SENSOR_LINK_NONE;
+}
 static volatile bool s_session_reset = false;
 static uint32_t s_ui_seq = 0;
 
@@ -440,6 +465,8 @@ void stroke_task(void *arg)
                             s_interval_phase_start_time_s = s_session_time_s;
                             s_interval_phase_start_dist_m = s_activity.distance_m;
                             s_interval_phase_start_strokes = s_activity.stroke_count;
+                            s_phase_hr_sum = 0;
+                            s_phase_hr_n = 0;
                         }
                         else if (ist.phase != s_interval_log_phase || ist.round_idx != s_interval_log_round)
                         {
@@ -455,6 +482,7 @@ void stroke_task(void *arg)
                                                s_session_time_s - s_interval_phase_start_time_s,
                                                s_activity.distance_m - s_interval_phase_start_dist_m,
                                                s_activity.stroke_count - s_interval_phase_start_strokes);
+                            interval_row.avg_hr = take_phase_hr_avg();
                             need_interval_log = true;
 
                             s_interval_log_phase = ist.phase;
@@ -479,6 +507,7 @@ void stroke_task(void *arg)
                                            s_session_time_s - s_interval_phase_start_time_s,
                                            s_activity.distance_m - s_interval_phase_start_dist_m,
                                            s_activity.stroke_count - s_interval_phase_start_strokes);
+                        interval_row.avg_hr = take_phase_hr_avg();
                         need_interval_log = true;
                         s_interval_phase_active = false;
                         s_interval_log_phase = INTERVAL_PHASE_IDLE;
@@ -545,6 +574,19 @@ void stroke_task(void *arg)
                     row.recovery_time_s = m.recovery_time_s;
                     // 15. Recovery Ratio
                     row.recovery_ratio = recov_ratio;
+                    sensor_hub_live_t live = {0};
+                    sensor_hub_get_live(&live);
+                    row.hr_bpm = live.hr_bpm;
+                    row.pod_valid = live.pod_valid;
+                    row.pod_catch_deg = (float)live.pod_catch_ddeg / 10.0f;
+                    row.pod_finish_deg = (float)live.pod_finish_ddeg / 10.0f;
+                    row.pod_arc_deg = (float)live.pod_arc_ddeg / 10.0f;
+                    if (s_interval_phase_active && live.hr_bpm > 0) {
+                        s_phase_hr_sum += live.hr_bpm;
+                        if (s_phase_hr_n < UINT16_MAX) {
+                            s_phase_hr_n++;
+                        }
+                    }
 
                     need_log = true;
                 }
@@ -565,6 +607,7 @@ void stroke_task(void *arg)
                                        s_session_time_s - s_interval_phase_start_time_s,
                                        s_activity.distance_m - s_interval_phase_start_dist_m,
                                        s_activity.stroke_count - s_interval_phase_start_strokes);
+                    interval_row.avg_hr = take_phase_hr_avg();
                     need_interval_log = true;
                     s_interval_phase_active = false;
                     s_interval_log_phase = INTERVAL_PHASE_IDLE;
@@ -667,6 +710,14 @@ void stroke_task(void *arg)
                     .race_remaining_m = rst.remaining_m,
                     .race_projected_s = rst.projected_finish_s,
                 };
+                sensor_hub_live_t live_ui = {0};
+                sensor_hub_get_live(&live_ui);
+                snap.hr_bpm = live_ui.hr_bpm;
+                snap.sensor_link = sensor_link_from_live(&live_ui);
+                snap.pod_valid = live_ui.pod_valid;
+                snap.pod_catch_deg = (float)live_ui.pod_catch_ddeg / 10.0f;
+                snap.pod_finish_deg = (float)live_ui.pod_finish_ddeg / 10.0f;
+                snap.pod_arc_deg = (float)live_ui.pod_arc_ddeg / 10.0f;
                 coach_ui_snapshot_publish(&snap);
             }
         }

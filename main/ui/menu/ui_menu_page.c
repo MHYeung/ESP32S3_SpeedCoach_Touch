@@ -146,11 +146,15 @@ static void menu_apply_grid_layout(void)
 
     lv_coord_t btn_w = (cw - gapc * (cols - 1)) / cols;
     lv_coord_t btn_h = (ch - gapr * (rows - 1)) / rows;
-    lv_coord_t btn = btn_w < btn_h ? btn_w : btn_h;
-    btn = LV_CLAMP(56, btn, 108);
+    if (btn_w < 48) {
+        btn_w = 48;
+    }
+    if (btn_h < 48) {
+        btn_h = 48;
+    }
 
     for (uint8_t i = 0; i < s_btn_count; i++) {
-        lv_obj_set_size(s_btns[i], btn, btn);
+        lv_obj_set_size(s_btns[i], btn_w, btn_h);
 
         int c = i % cols;
         int r = i / cols;
@@ -161,10 +165,10 @@ static void menu_apply_grid_layout(void)
 
         lv_obj_t *lb = lv_obj_get_child(s_btns[i], 1);
         if (lb)
-            lv_obj_set_width(lb, btn);
+            lv_obj_set_width(lb, btn_w);
     }
 
-    lv_obj_set_height(s_grid, rows * btn + gapr * (rows - 1));
+    lv_obj_set_height(s_grid, rows * btn_h + gapr * (rows - 1));
 }
 
 void menu_page_create(lv_obj_t *parent)
@@ -193,8 +197,8 @@ void menu_page_create(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(s_grid, LV_OPA_TRANSP, 0);
     lv_obj_set_width(s_grid, lv_pct(100));
     lv_obj_set_style_pad_all(s_grid, 0, 0);
-    lv_obj_set_style_pad_row(s_grid, 6, 0);
-    lv_obj_set_style_pad_column(s_grid, 6, 0);
+    lv_obj_set_style_pad_row(s_grid, 8, 0);
+    lv_obj_set_style_pad_column(s_grid, 8, 0);
 
     lv_coord_t btn_size = 72;
 

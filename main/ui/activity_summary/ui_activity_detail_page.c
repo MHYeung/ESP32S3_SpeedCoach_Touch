@@ -2,7 +2,7 @@
 #include "ui_status_bar.h"
 #include "ui_theme.h"
 #include "activity_store.h"
-#include "nvs_helper.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
@@ -43,6 +43,7 @@ typedef struct
     bool ok;
     bool retry_prev;
     bool interval_activity;
+    uint16_t avg_hr;
     activity_store_split_t rows[PAGE_ROWS + 1];
 } detail_load_result_t;
 
@@ -309,10 +310,7 @@ static void apply_loaded_rows(const activity_store_split_t *rows,
         }
         else
         {
-            uint32_t s_current_m = nvs_helper_get_split_len();
-            char hint_msg[64];
-            snprintf(hint_msg, sizeof(hint_msg), "No splits yet.\nRow past %um to create splits.", (unsigned int)s_current_m);
-            show_hint(hint_msg);
+            show_hint("No splits in this file.");
         }
         update_nav_controls();
         return;
@@ -382,6 +380,17 @@ static void apply_load_result_async(void *p)
                       res->total_known,
                       res->total_rows,
                       res->interval_activity);
+    if (s_name_lbl && lv_obj_is_valid(s_name_lbl)) {
+        char title[48];
+        char buf[64];
+        format_activity_title(title, sizeof(title));
+        if (res->avg_hr > 0) {
+            snprintf(buf, sizeof(buf), "%s  HR %u", title, (unsigned)res->avg_hr);
+        } else {
+            snprintf(buf, sizeof(buf), "%s", title);
+        }
+        lv_label_set_text(s_name_lbl, buf);
+    }
     free(res);
 }
 
@@ -435,6 +444,7 @@ static void detail_load_task(void *arg)
                 res->total_rows = total;
             }
             res->interval_activity = summary.is_interval;
+            res->avg_hr = summary.avg_hr;
         }
 
         lv_async_call(apply_load_result_async, res);
@@ -453,16 +463,18 @@ static void ensure_loader(void)
         return;
     }
 
-    BaseType_t ok = xTaskCreatePinnedToCore(detail_load_task,
-                                            "act_detail_loader",
-                                            6144,
-                                            NULL,
-                                            5,
-                                            &s_load_task,
-                                            1);
+    /* NimBLE sits on core 1. A pinned 6 KB stack there fails once both
+     * sensor links are up. Leave the core free and keep the stack small. */
+    BaseType_t ok = xTaskCreate(detail_load_task,
+                                "act_detail_loader",
+                                4096,
+                                NULL,
+                                4,
+                                &s_load_task);
     if (ok != pdPASS)
     {
-        ESP_LOGE(TAG, "Failed to create detail load task");
+        ESP_LOGE(TAG, "Failed to create detail load task, free heap %u",
+                 (unsigned)esp_get_free_heap_size());
         vQueueDelete(s_load_q);
         s_load_q = NULL;
         return;
@@ -583,8 +595,8 @@ static void relayout(void)
     lv_coord_t w = lv_obj_get_width(s_root);
 
     lv_coord_t pad_lr = land ? 6 : 2;
-    lv_coord_t hdr_h = land ? 16 : 18;
-    lv_coord_t nav_h = land ? 20 : 22;
+    lv_coord_t hdr_h = 24;
+    lv_coord_t nav_h = 32;
 
     if (s_name_lbl)
     {
@@ -710,6 +722,7 @@ void activity_detail_page_create(lv_obj_t *parent)
     lv_obj_set_flex_flow(s_root, LV_FLEX_FLOW_COLUMN);
 
     ui_status_bar_create(&s_status, s_root);
+    ui_status_bar_set_title(&s_status, "Splits", UI_ACTIVITY_SUMMARY_PAGE);
 
     s_nav_row = lv_obj_create(s_root);
     lv_obj_set_width(s_nav_row, lv_pct(100));
@@ -735,8 +748,8 @@ void activity_detail_page_create(lv_obj_t *parent)
     ui_theme_apply_button(s_btn_prev);
     lv_obj_add_event_cb(s_btn_prev, nav_btn_event_cb, LV_EVENT_CLICKED, (void *)"prev");
     lv_obj_t *prev_lbl = lv_label_create(s_btn_prev);
-    ui_theme_apply_label(prev_lbl, true);
     lv_label_set_text(prev_lbl, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(prev_lbl, ui_theme_palette()->accent_text, 0);
     lv_obj_align(prev_lbl, LV_ALIGN_CENTER, 0, 0);
 
     s_page_lbl = lv_label_create(s_nav_row);
@@ -749,8 +762,8 @@ void activity_detail_page_create(lv_obj_t *parent)
     ui_theme_apply_button(s_btn_next);
     lv_obj_add_event_cb(s_btn_next, nav_btn_event_cb, LV_EVENT_CLICKED, (void *)"next");
     lv_obj_t *next_lbl = lv_label_create(s_btn_next);
-    ui_theme_apply_label(next_lbl, true);
     lv_label_set_text(next_lbl, LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_color(next_lbl, ui_theme_palette()->accent_text, 0);
     lv_obj_align(next_lbl, LV_ALIGN_CENTER, 0, 0);
 
     s_hdr_row = lv_obj_create(s_root);
@@ -770,7 +783,7 @@ void activity_detail_page_create(lv_obj_t *parent)
     for (int c = 0; c < SPLIT_COLS; c++)
     {
         s_hdr_lbl[c] = lv_label_create(s_hdr_row);
-        ui_theme_apply_label(s_hdr_lbl[c], true);
+        ui_theme_apply_label(s_hdr_lbl[c], false);
         lv_label_set_text(s_hdr_lbl[c], s_col_hdr[c]);
         lv_obj_set_width(s_hdr_lbl[c], s_col_w[c]);
         lv_obj_set_flex_grow(s_hdr_lbl[c], 0);
@@ -807,10 +820,11 @@ void activity_detail_page_create(lv_obj_t *parent)
     lv_obj_set_style_pad_ver(s_tbl, 6, LV_PART_ITEMS);
     lv_obj_set_style_text_align(s_tbl, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
     lv_obj_set_style_text_font(s_tbl, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_tbl, ui_theme_palette()->text, LV_PART_ITEMS);
     lv_obj_set_style_border_width(s_tbl, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_side(s_tbl, LV_BORDER_SIDE_BOTTOM, LV_PART_ITEMS);
     lv_obj_set_style_border_color(s_tbl, ui_theme_palette()->border, LV_PART_ITEMS);
-    lv_obj_set_style_border_opa(s_tbl, LV_OPA_40, LV_PART_ITEMS);
+    lv_obj_set_style_border_opa(s_tbl, LV_OPA_COVER, LV_PART_ITEMS);
 
     /* Explicit item background so the FILL draw task is always emitted */
     lv_obj_set_style_bg_opa(s_tbl, LV_OPA_COVER, LV_PART_ITEMS);
@@ -848,16 +862,25 @@ void activity_detail_page_apply_theme(void)
     ui_status_bar_apply_theme(&s_status);
     if (s_hdr_row)
         ui_theme_apply_surface(s_hdr_row);
-    if (s_btn_prev)
+    if (s_btn_prev) {
         ui_theme_apply_button(s_btn_prev);
-    if (s_btn_next)
+        lv_obj_t *glyph = lv_obj_get_child(s_btn_prev, 0);
+        if (glyph)
+            lv_obj_set_style_text_color(glyph, ui_theme_palette()->accent_text, 0);
+    }
+    if (s_btn_next) {
         ui_theme_apply_button(s_btn_next);
+        lv_obj_t *glyph = lv_obj_get_child(s_btn_next, 0);
+        if (glyph)
+            lv_obj_set_style_text_color(glyph, ui_theme_palette()->accent_text, 0);
+    }
     if (s_page_lbl)
         ui_theme_apply_label(s_page_lbl, true);
     if (s_name_lbl)
         ui_theme_apply_label(s_name_lbl, false);
     if (s_tbl) {
         lv_obj_set_style_bg_color(s_tbl, ui_theme_palette()->surface, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(s_tbl, ui_theme_palette()->text, LV_PART_ITEMS);
         lv_obj_set_style_border_color(s_tbl, ui_theme_palette()->border, LV_PART_ITEMS);
     }
 }

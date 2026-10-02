@@ -13,11 +13,16 @@ typedef enum {
 } ui_status_bar_kind_t;
 
 #define UI_STATUS_BAR_COMPACT_H 22
-#define UI_STATUS_BAR_FULL_H    22
+#define UI_STATUS_BAR_FULL_H    20
 
 typedef struct {
     lv_obj_t *root;
     lv_obj_t *time_label;
+    lv_obj_t *title_btn;
+    lv_obj_t *back_icon;
+    lv_obj_t *title_label;
+    ui_page_t back_page;
+    bool has_back;
 
     lv_obj_t *gps_cont;
     lv_obj_t *gps_icon;
@@ -26,6 +31,7 @@ typedef struct {
     lv_obj_t *batt_label;
     lv_obj_t *rec_dot;
     lv_obj_t *lock_label;
+    lv_obj_t *ble_label;
 
     ui_orientation_t orient;
     ui_status_bar_kind_t kind;
@@ -34,9 +40,12 @@ typedef struct {
     bool gps_stale;
     bool recording;
     bool touch_locked;
+    sensor_link_t sensor_link;
 } ui_status_bar_t;
 
 void ui_status_bar_create(ui_status_bar_t *bar, lv_obj_t *parent);
+/** Menu-type rail: title plus a back chevron. Tapping it opens back_page. */
+void ui_status_bar_set_title(ui_status_bar_t *bar, const char *title, ui_page_t back_page);
 void ui_status_bar_create_ex(ui_status_bar_t *bar, lv_obj_t *parent, ui_status_bar_kind_t kind);
 void ui_status_bar_apply_theme(ui_status_bar_t *bar);
 void ui_status_bar_set_orientation(ui_status_bar_t *bar, ui_orientation_t o);

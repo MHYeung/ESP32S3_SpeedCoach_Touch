@@ -30,9 +30,7 @@ static bool s_bat_inited = false;
 static lv_timer_t *s_shared_clock = NULL;
 static lv_timer_t *s_shared_batt = NULL;
 
-static int32_t s_cols_land[] = {LV_GRID_FR(3), LV_GRID_FR(2), LV_GRID_FR(2), LV_GRID_TEMPLATE_LAST};
-static int32_t s_cols_port[] = {LV_GRID_FR(5), LV_GRID_FR(4), LV_GRID_FR(4), LV_GRID_TEMPLATE_LAST};
-static int32_t s_cols_compact[] = {LV_GRID_FR(2), LV_GRID_FR(3), LV_GRID_FR(2), LV_GRID_FR(2), LV_GRID_TEMPLATE_LAST};
+static int32_t s_cols_compact[] = {LV_GRID_FR(2), LV_GRID_FR(2), LV_GRID_CONTENT, LV_GRID_FR(3), LV_GRID_FR(2), LV_GRID_TEMPLATE_LAST};
 static int32_t s_rows[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
 
 static bool status_bar_is_landscape(void)
@@ -81,6 +79,15 @@ static void status_bar_set_time_placeholder(ui_status_bar_t *bar)
     label_set_text_if_changed(bar->time_label, status_bar_is_landscape() ? "--:--:--" : "--:--");
 }
 
+static void title_back_cb(lv_event_t *e)
+{
+    ui_status_bar_t *bar = (ui_status_bar_t *)lv_event_get_user_data(e);
+    if (!bar || !bar->has_back) {
+        return;
+    }
+    ui_go_to_page(bar->back_page, true);
+}
+
 static void status_bar_apply_layout(ui_status_bar_t *bar)
 {
     bool land = status_bar_is_landscape();
@@ -91,16 +98,16 @@ static void status_bar_apply_layout(ui_status_bar_t *bar)
         lv_obj_set_height(bar->root, UI_STATUS_BAR_COMPACT_H);
         return;
     }
-    lv_obj_set_grid_dsc_array(bar->root, land ? s_cols_land : s_cols_port, s_rows);
-    lv_obj_set_style_pad_hor(bar->root, land ? 8 : 6, 0);
-    lv_obj_set_style_pad_ver(bar->root, 1, 0);
+    (void)land;
+    lv_obj_set_layout(bar->root, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(bar->root, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(bar->root, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(bar->root, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bar->root, 0, 0);
+    lv_obj_set_style_radius(bar->root, 0, 0);
+    lv_obj_set_style_pad_hor(bar->root, 2, 0);
+    lv_obj_set_style_pad_ver(bar->root, 0, 0);
     lv_obj_set_height(bar->root, UI_STATUS_BAR_FULL_H);
-    if (bar->time_label) {
-        lv_label_set_long_mode(bar->time_label, LV_LABEL_LONG_DOT);
-    }
-    if (bar->batt_label) {
-        lv_label_set_long_mode(bar->batt_label, LV_LABEL_LONG_DOT);
-    }
 }
 
 static void status_bar_battery_init_once(void)
@@ -150,6 +157,22 @@ static void apply_gps_visual(ui_status_bar_t *bar)
         }
         lv_obj_set_style_bg_color(bar->gps_bars[i], (i < (int)bars) ? sig_color : dim, 0);
     }
+}
+
+static void apply_ble(ui_status_bar_t *bar)
+{
+    if (!bar || !bar->ble_label) {
+        return;
+    }
+    if (bar->sensor_link == SENSOR_LINK_NONE) {
+        lv_obj_add_flag(bar->ble_label, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_remove_flag(bar->ble_label, LV_OBJ_FLAG_HIDDEN);
+    lv_color_t color = (bar->sensor_link == SENSOR_LINK_LIVE)
+                           ? ui_theme_color_accent()
+                           : lv_palette_main(LV_PALETTE_RED);
+    lv_obj_set_style_text_color(bar->ble_label, color, 0);
 }
 
 static void apply_rec_lock(ui_status_bar_t *bar)
@@ -273,7 +296,9 @@ static void build_gps_widget(ui_status_bar_t *bar, int grid_col)
     lv_obj_set_layout(bar->gps_cont, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(bar->gps_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar->gps_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_grid_cell(bar->gps_cont, LV_GRID_ALIGN_STRETCH, grid_col, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    if (grid_col >= 0) {
+        lv_obj_set_grid_cell(bar->gps_cont, LV_GRID_ALIGN_STRETCH, grid_col, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    }
 
     bar->gps_icon = lv_label_create(bar->gps_cont);
     ui_theme_apply_label(bar->gps_icon, true);
@@ -342,33 +367,76 @@ void ui_status_bar_create_ex(ui_status_bar_t *bar, lv_obj_t *parent, ui_status_b
         lv_obj_set_style_text_font(bar->lock_label, ui_font_caption(), 0);
         lv_obj_set_grid_cell(bar->lock_label, LV_GRID_ALIGN_CENTER, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 
-        build_gps_widget(bar, 2);
+        bar->ble_label = lv_label_create(bar->root);
+        lv_label_set_text(bar->ble_label, LV_SYMBOL_BLUETOOTH);
+        lv_obj_set_style_text_font(bar->ble_label, ui_font_caption(), 0);
+        lv_obj_add_flag(bar->ble_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_grid_cell(bar->ble_label, LV_GRID_ALIGN_CENTER, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+
+        build_gps_widget(bar, 3);
 
         bar->batt_label = lv_label_create(bar->root);
         lv_label_set_text(bar->batt_label, "--%");
         ui_theme_apply_label(bar->batt_label, true);
         lv_obj_set_style_text_font(bar->batt_label, ui_font_caption(), 0);
         lv_obj_set_style_text_align(bar->batt_label, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_grid_cell(bar->batt_label, LV_GRID_ALIGN_STRETCH, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+        lv_obj_set_grid_cell(bar->batt_label, LV_GRID_ALIGN_STRETCH, 4, 1, LV_GRID_ALIGN_CENTER, 0, 1);
     } else {
-        lv_obj_set_grid_dsc_array(bar->root, (status_bar_is_landscape() ? s_cols_land : s_cols_port), s_rows);
+        lv_obj_set_style_bg_opa(bar->root, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(bar->root, 0, 0);
+        lv_obj_set_style_radius(bar->root, 0, 0);
+
+        bar->title_btn = lv_obj_create(bar->root);
+        lv_obj_remove_style_all(bar->title_btn);
+        lv_obj_set_height(bar->title_btn, UI_STATUS_BAR_FULL_H);
+        lv_obj_set_flex_grow(bar->title_btn, 1);
+        lv_obj_set_flex_flow(bar->title_btn, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(bar->title_btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(bar->title_btn, 2, 0);
+        lv_obj_add_flag(bar->title_btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(bar->title_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(bar->title_btn, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(bar->title_btn, title_back_cb, LV_EVENT_CLICKED, bar);
+
+        bar->back_icon = lv_label_create(bar->title_btn);
+        lv_label_set_text(bar->back_icon, LV_SYMBOL_LEFT);
+        lv_obj_set_style_text_font(bar->back_icon, ui_font_caption(), 0);
+        ui_theme_apply_label(bar->back_icon, false);
+
+        bar->title_label = lv_label_create(bar->title_btn);
+        ui_theme_apply_label(bar->title_label, false);
+        lv_obj_set_style_text_font(bar->title_label, ui_font_caption(), 0);
+        lv_label_set_long_mode(bar->title_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_flex_grow(bar->title_label, 1);
+        lv_label_set_text(bar->title_label, "");
 
         bar->time_label = lv_label_create(bar->root);
         ui_theme_apply_label(bar->time_label, false);
-        lv_obj_add_flag(bar->time_label, LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_label_set_long_mode(bar->time_label, LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_align(bar->time_label, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_set_grid_cell(bar->time_label, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+        lv_obj_set_style_text_font(bar->time_label, ui_font_caption(), 0);
+        lv_label_set_long_mode(bar->time_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_flex_grow(bar->time_label, 1);
+        lv_label_set_text(bar->time_label, "--:--");
 
-        build_gps_widget(bar, 1);
+        lv_obj_t *ind = lv_obj_create(bar->root);
+        lv_obj_remove_style_all(ind);
+        lv_obj_set_height(ind, UI_STATUS_BAR_FULL_H);
+        lv_obj_set_flex_flow(ind, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(ind, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(ind, 6, 0);
+        lv_obj_clear_flag(ind, LV_OBJ_FLAG_SCROLLABLE);
 
-        bar->batt_label = lv_label_create(bar->root);
+        build_gps_widget(bar, -1);
+        lv_obj_set_parent(bar->gps_cont, ind);
+
+        bar->ble_label = lv_label_create(ind);
+        lv_label_set_text(bar->ble_label, LV_SYMBOL_BLUETOOTH);
+        lv_obj_set_style_text_font(bar->ble_label, ui_font_caption(), 0);
+        lv_obj_add_flag(bar->ble_label, LV_OBJ_FLAG_HIDDEN);
+
+        bar->batt_label = lv_label_create(ind);
         lv_label_set_text(bar->batt_label, "--%");
         ui_theme_apply_label(bar->batt_label, true);
-        lv_obj_add_flag(bar->batt_label, LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_label_set_long_mode(bar->batt_label, LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_align(bar->batt_label, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_grid_cell(bar->batt_label, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+        lv_obj_set_style_text_font(bar->batt_label, ui_font_caption(), 0);
     }
 
     register_bar(bar);
@@ -393,15 +461,41 @@ void ui_status_bar_create(ui_status_bar_t *bar, lv_obj_t *parent)
     ui_status_bar_create_ex(bar, parent, UI_STATUS_BAR_FULL);
 }
 
+void ui_status_bar_set_title(ui_status_bar_t *bar, const char *title, ui_page_t back_page)
+{
+    if (!bar || !bar->title_btn || !bar->title_label) {
+        return;
+    }
+    bar->has_back = true;
+    bar->back_page = back_page;
+    lv_label_set_text(bar->title_label, title ? title : "");
+    lv_obj_clear_flag(bar->title_btn, LV_OBJ_FLAG_HIDDEN);
+    if (bar->time_label) {
+        lv_obj_add_flag(bar->time_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void ui_status_bar_apply_theme(ui_status_bar_t *bar)
 {
     if (!bar) {
         return;
     }
     if (bar->root) {
-        ui_theme_apply_surface(bar->root);
-        lv_obj_set_style_radius(bar->root, 0, 0);
-        lv_obj_set_style_border_width(bar->root, 0, 0);
+        if (bar->kind == UI_STATUS_BAR_FULL) {
+            lv_obj_set_style_bg_opa(bar->root, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(bar->root, 0, 0);
+            lv_obj_set_style_radius(bar->root, 0, 0);
+        } else {
+            ui_theme_apply_surface(bar->root);
+            lv_obj_set_style_radius(bar->root, 0, 0);
+            lv_obj_set_style_border_width(bar->root, 0, 0);
+        }
+    }
+    if (bar->title_label) {
+        ui_theme_apply_label(bar->title_label, false);
+    }
+    if (bar->back_icon) {
+        ui_theme_apply_label(bar->back_icon, false);
     }
     if (bar->time_label) {
         ui_theme_apply_label(bar->time_label, false);
@@ -414,6 +508,7 @@ void ui_status_bar_apply_theme(ui_status_bar_t *bar)
     }
     apply_gps_visual(bar);
     apply_rec_lock(bar);
+    apply_ble(bar);
 }
 
 void ui_status_bar_set_orientation(ui_status_bar_t *bar, ui_orientation_t o)
@@ -512,6 +607,10 @@ void ui_status_bar_apply_snapshot(const coach_ui_snapshot_t *snap)
         }
         if (snap->battery_pct <= 100) {
             status_bar_set_batt_text(bar, (int)snap->battery_pct);
+        }
+        if (bar->sensor_link != snap->sensor_link) {
+            bar->sensor_link = snap->sensor_link;
+            apply_ble(bar);
         }
     }
 }

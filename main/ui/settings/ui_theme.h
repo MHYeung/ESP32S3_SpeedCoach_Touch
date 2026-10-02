@@ -38,8 +38,13 @@ void ui_theme_apply_surface(lv_obj_t *obj);
 void ui_theme_apply_surface_border(lv_obj_t *obj);
 void ui_theme_apply_label(lv_obj_t *label, bool muted);
 void ui_theme_apply_button(lv_obj_t *btn);
+void ui_theme_apply_button_secondary(lv_obj_t *btn);
+void ui_theme_apply_stepper(lv_obj_t *btn);
+void ui_theme_apply_field(lv_obj_t *obj);
 void ui_theme_apply_switch(lv_obj_t *sw);
 void ui_theme_apply_tile(lv_obj_t *obj);
+/** One rounded card. Rows inside supply their own dividers. */
+void ui_theme_apply_list_group(lv_obj_t *obj);
 
 lv_color_t ui_theme_color_work(void);
 lv_color_t ui_theme_color_rest(void);
